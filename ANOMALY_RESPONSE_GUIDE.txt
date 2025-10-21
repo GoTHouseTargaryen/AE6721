@@ -1,0 +1,266 @@
+====================================================================================
+ANOMALY RESPONSE FLOW - VISUAL GUIDE
+====================================================================================
+
+SCENARIO: BATTERY ANOMALY EXAMPLE
+─────────────────────────────────────────────────────────────────────────────────
+
+T+0:00    │ Battery: 28.5V │ Status: GREEN  │ Anomaly Flag: OFF
+          │ [■■■■■■■■■■]   │                │
+          │ NOMINAL        │                │
+          └────────────────┴────────────────┴───────────────────────────────────
+
+T+0:30    │ Battery: 27.0V │ Status: GREEN  │ Anomaly Flag: OFF
+          │ [■■■■■■■■□□]   │                │
+          │ Still OK       │                │
+          └────────────────┴────────────────┴───────────────────────────────────
+
+T+1:00    │ Battery: 25.8V │ Status: YELLOW │ Anomaly Flag: ON ← CAUTION!
+          │ [■■■■■■□□□□]   │ ⚠ WARNING     │ System now degrading faster
+          └────────────────┴────────────────┴───────────────────────────────────
+                                 ↓
+                    ┌────────────┴────────────┐
+                    │   USER DECISION POINT    │
+                    └────────────┬────────────┘
+                                 ↓
+              ┌──────────────────┴──────────────────┐
+              ↓                                     ↓
+        DO NOTHING                          SEND COMMAND
+              ↓                                     ↓
+
+T+1:01    │ Battery: 25.6V │ Status: YELLOW │ Anomaly Flag: ON
+          │ [■■■■■□□□□□]   │ ⚠ CAUTION     │ Getting worse!
+          │ DEGRADING      │                │
+          └────────────────┴────────────────┴───────────────────────────────────
+
+T+1:02    │ Battery: 25.4V │ Status: YELLOW │ Anomaly Flag: ON
+          │ [■■■■■□□□□□]   │ ⚠ CAUTION     │ Still degrading
+          └────────────────┴────────────────┴───────────────────────────────────
+
+T+1:03    │ Battery: 24.3V │ Status: RED    │ Anomaly Flag: ON ← WARNING!
+          │ [■■■□□□□□□□]   │ ⚠⚠⚠ CRITICAL │ ESCALATED!
+          └────────────────┴────────────────┴───────────────────────────────────
+                                                    ↓
+                                          OPERATOR RESPONDS
+                                                    ↓
+                                          Clicks "Power Reset"
+                                                    ↓
+T+1:04    │ Battery: 28.0V │ Status: GREEN  │ Anomaly Flag: OFF ← FIXED!
+          │ [■■■■■■■■■□]   │ ✓ NOMINAL     │ System recovered
+          │ RECOVERED      │                │
+          └────────────────┴────────────────┴───────────────────────────────────
+
+
+====================================================================================
+COMMAND BUTTON FUNCTIONS
+====================================================================================
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                           EID GUI - Command Panel                            │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                               │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐       │
+│  │  Attitude   │  │   Power     │  │  Thermal    │  │    Comm     │       │
+│  │   Reset     │  │   Reset     │  │   Reset     │  │   Reset     │       │
+│  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘       │
+│         │                │                 │                 │               │
+│         ↓                ↓                 ↓                 ↓               │
+│   Fixes attitude   Fixes battery    Fixes temp        Fixes comm            │
+│   Roll→0°          Voltage→28V      Temp→22°C         Signal→95%           │
+│   Pitch→0°         Current→2.3A                                             │
+│   Yaw→0°                                                                     │
+│                                                                               │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐       │
+│  │   Clear     │  │   System    │  │    Data     │  │  Watchdog   │       │
+│  │  Cautions   │  │   Check     │  │   Reset     │  │   Reset     │       │
+│  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘       │
+│         │                │                 │                 │               │
+│         ↓                ↓                 ↓                 ↓               │
+│   Clears all      Logs system      Logs data         Logs watchdog          │
+│   caution flags   status check     reset event       reset event            │
+│   (if nominal)                                                               │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+
+====================================================================================
+ANOMALY RESPONSE WINDOW (Click Red TLM Display)
+====================================================================================
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                    Anomaly Response Command Window                           │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                               │
+│                    ┌────────────────────────────┐                           │
+│                    │       Safe Mode             │  ← Resets EVERYTHING     │
+│                    └─────────────┬──────────────┘                           │
+│                                  ↓                                           │
+│                         Clears ALL anomalies                                 │
+│                         Resets ALL systems                                   │
+│                         Returns to nominal                                   │
+│                                                                               │
+│                    ┌────────────────────────────┐                           │
+│                    │      Power Reset            │  ← Same as Cmd 2         │
+│                    └────────────────────────────┘                           │
+│                                                                               │
+│                    ┌────────────────────────────┐                           │
+│                    │     Attitude Hold           │  ← Stabilizes S/C        │
+│                    └────────────────────────────┘                           │
+│                                                                               │
+│                    ┌────────────────────────────┐                           │
+│                    │  Battery Charge Mode        │  ← +2V boost             │
+│                    └────────────────────────────┘                           │
+│                                                                               │
+│                    ┌────────────────────────────┐                           │
+│                    │  Emergency Shutdown         │  ← Reduce load           │
+│                    └────────────────────────────┘                           │
+│                                                                               │
+│                    ┌────────────────────────────┐                           │
+│                    │    Diagnostic Mode          │  ← Run diagnostics       │
+│                    └────────────────────────────┘                           │
+│                                                                               │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+
+====================================================================================
+CONTROL GUI - CLEAR CAUTIONS FEATURE
+====================================================================================
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                              Command Window                                  │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                               │
+│  ┌────────────────────────────────────────────┐  ┌──────┐  ┌─────────────┐│
+│  │ Type command here...                       │  │ Send │  │Clear Cautions││
+│  └────────────────────────────────────────────┘  └──────┘  └──────┬──────┘│
+│                                                                      ↓       │
+│                                                           Clears caution     │
+│                                                           flags IF values    │
+│                                                           are now nominal    │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+CLEAR CAUTIONS LOGIC:
+═══════════════════════════════════════════════════════════════════════════════
+IF Battery ≥ 26.0V        → Clear battery_low flag
+IF Attitude < 2.0°        → Clear attitude_deviation flag  
+IF Temp 18-28°C           → Clear temperature flags
+IF Comm Signal ≥ 80%      → Clear comm_degraded flag
+
+NOTE: Only clears if telemetry is ACTUALLY nominal. Won't clear if still bad!
+
+
+====================================================================================
+TRAFFIC LIGHT SYSTEM (EID GUI)
+====================================================================================
+
+TLM Display Color Coding:
+─────────────────────────────────────────────────────────────────────────────────
+
+┌────────────┐
+│ Battery    │  GREEN  = Voltage ≥ 26.0V (nominal)
+│  28.2 V    │  
+└────────────┘
+
+┌────────────┐
+│ Battery    │  YELLOW = Voltage 24.5-26.0V (caution) ⚠
+│  25.3 V    │  
+└────────────┘
+
+┌────────────┐
+│ Battery    │  RED    = Voltage < 24.5V (warning) ⚠⚠⚠
+│  23.8 V    │  
+└────────────┘
+
+When YELLOW or RED → Anomaly persists and can worsen
+                    → Must send command to fix
+                    → Will NOT self-recover without action
+
+
+====================================================================================
+SYSTEM STATES DIAGRAM
+====================================================================================
+
+                              NOMINAL STATE
+                         (All systems green)
+                                  │
+                                  │ Anomaly develops
+                                  ↓
+                            CAUTION STATE
+                           (Yellow warning)
+                         Anomaly flag = ON
+                                  │
+                    ┌─────────────┴─────────────┐
+                    ↓                           ↓
+            User sends command          No action taken
+                    ↓                           ↓
+            ANOMALY CLEARED              Continues to degrade
+            Back to NOMINAL                     ↓
+            Anomaly flag = OFF            WARNING STATE
+                                            (Red alert)
+                                         Anomaly flag = ON
+                                                │
+                                    ┌───────────┴───────────┐
+                                    ↓                       ↓
+                            User sends command      No action (critical)
+                                    ↓                       ↓
+                            ANOMALY CLEARED           System failure
+                            Back to NOMINAL           (simulation continues
+                            Anomaly flag = OFF         but in critical state)
+
+
+====================================================================================
+TIMING AND DATA RATES
+====================================================================================
+
+Old System (10 Hz):           New System (1 Hz):
+─────────────────────         ─────────────────────
+Update every 0.1 sec          Update every 1.0 sec
+Fast updates                  More realistic timing
+Hard to see changes           Easy to observe changes
+High CPU usage                Lower CPU usage
+
+
+====================================================================================
+EXAMPLE OPERATOR SESSION
+====================================================================================
+
+[00:00] System start - All nominal (green)
+[00:45] Enter eclipse - Solar array drops to 0
+[01:15] Battery at 25.8V - CAUTION appears (yellow)
+        EVR Log: "Battery voltage low"
+[01:20] Battery at 25.3V - Still yellow, degrading
+[01:25] Battery at 24.3V - WARNING appears (red)
+        EVR Log: "LOW BATTERY VOLTAGE"
+[01:27] Operator clicks "Power Reset" button
+        EVR Log: "Power system reset complete - battery nominal"
+[01:28] Battery at 28.0V - Back to green, anomaly cleared
+[01:30] Operator clicks "Clear Cautions" (extra safety step)
+[01:35] Exit eclipse - Solar array returns
+[02:00] System stable, all nominal
+
+
+====================================================================================
+QUICK REFERENCE - WHAT TO DO WHEN...
+====================================================================================
+
+YELLOW TLM Display:
+→ Monitor closely
+→ Prepare to send command
+→ Will worsen if ignored
+
+RED TLM Display:
+→ Immediate action required
+→ Click display for emergency menu OR
+→ Click appropriate reset button
+→ Verify anomaly clears
+
+Multiple Anomalies:
+→ Use "Safe Mode" to reset all
+→ Or address individually
+
+After Fix:
+→ Verify color returns to green
+→ Check EVR log for confirmation
+→ Click "Clear Cautions" if needed
+
+
+====================================================================================

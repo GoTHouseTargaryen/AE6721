@@ -1,0 +1,393 @@
+================================================================================
+SPACECRAFT COMMAND REFERENCE
+6U CubeSat Ground Command Display System
+================================================================================
+
+This document describes all available commands for nominal operations and
+anomaly response. Commands can be typed in the Control GUI command window
+or executed via buttons in the EID GUI.
+
+================================================================================
+NOMINAL OPERATIONS COMMANDS
+================================================================================
+
+ATTITUDE CONTROL COMMANDS
+-------------------------
+ATT_NADIR
+    Description: Point spacecraft nadir (Earth-facing)
+    Parameters: None
+    Example: ATT_NADIR
+    Result: Attitude mode set to nadir pointing, targets 0° roll/pitch/yaw
+
+ATT_SUN_POINT
+    Description: Point spacecraft toward sun for maximum power generation
+    Parameters: None
+    Example: ATT_SUN_POINT
+    Result: Attitude mode set to sun pointing, increases solar array current
+
+ATT_INERTIAL
+    Description: Hold current inertial attitude (no active pointing)
+    Parameters: None
+    Example: ATT_INERTIAL
+    Result: Spacecraft maintains current attitude, minimal reaction wheel usage
+
+ATT_SLEW <roll> <pitch> <yaw>
+    Description: Slew spacecraft to specified attitude
+    Parameters: 
+        roll    - Roll angle in degrees (-180 to +180)
+        pitch   - Pitch angle in degrees (-90 to +90)
+        yaw     - Yaw angle in degrees (-180 to +180)
+    Examples:
+        ATT_SLEW 0 0 0          (point to default orientation)
+        ATT_SLEW 45 0 0         (roll 45 degrees)
+        ATT_SLEW 0 -15 90       (pitch down 15°, yaw 90°)
+    Result: Spacecraft slews to target attitude at controlled rate
+
+
+OPERATIONAL MODE COMMANDS
+--------------------------
+MODE_NOMINAL
+    Description: Normal operations mode
+    Parameters: None
+    Example: MODE_NOMINAL
+    Power: ~10W consumption, all systems active
+    Result: Standard operations with full functionality
+
+MODE_SCIENCE
+    Description: Science/payload operations mode (high power)
+    Parameters: None
+    Example: MODE_SCIENCE
+    Power: ~14W consumption, payload instruments active
+    Result: Increased power consumption for science operations
+
+MODE_LOW_POWER
+    Description: Low power conservation mode
+    Parameters: None
+    Example: MODE_LOW_POWER
+    Power: ~5W consumption, non-essential systems off
+    Result: Reduced functionality to conserve battery power
+
+
+THRESHOLD ADJUSTMENT COMMANDS
+------------------------------
+THR_BATT_MIN <voltage>
+    Description: Set minimum battery voltage threshold (warning level)
+    Parameters:
+        voltage - Voltage in volts (V), typically 10.5-11.5V for 12V system
+    Examples:
+        THR_BATT_MIN 10.8       (set warning at 10.8V)
+        THR_BATT_MIN 11.0       (more conservative threshold)
+    Result: Warning triggers when battery drops below this value
+
+THR_BATT_CAUT <voltage>
+    Description: Set battery caution voltage threshold
+    Parameters:
+        voltage - Voltage in volts (V), typically 11.0-11.5V
+    Examples:
+        THR_BATT_CAUT 11.2      (caution at 11.2V)
+        THR_BATT_CAUT 11.5      (earlier warning)
+    Result: Caution triggers when battery drops below this value
+
+THR_TEMP_MIN <temperature>
+    Description: Set minimum internal temperature threshold (warning level)
+    Parameters:
+        temperature - Temperature in Celsius (°C)
+    Examples:
+        THR_TEMP_MIN 0          (warning below 0°C)
+        THR_TEMP_MIN 5          (warning below 5°C)
+    Result: Warning triggers when temp drops below this value
+
+THR_TEMP_MAX <temperature>
+    Description: Set maximum internal temperature threshold (warning level)
+    Parameters:
+        temperature - Temperature in Celsius (°C)
+    Examples:
+        THR_TEMP_MAX 40         (warning above 40°C)
+        THR_TEMP_MAX 45         (higher tolerance)
+    Result: Warning triggers when temp exceeds this value
+
+THR_ATT_CAUT <degrees>
+    Description: Set attitude deviation caution threshold
+    Parameters:
+        degrees - Angle in degrees from target attitude
+    Examples:
+        THR_ATT_CAUT 5          (caution at 5° deviation)
+        THR_ATT_CAUT 10         (more tolerant)
+    Result: Caution triggers when attitude deviates beyond this angle
+
+THR_ATT_WARN <degrees>
+    Description: Set attitude deviation warning threshold
+    Parameters:
+        degrees - Angle in degrees from target attitude
+    Examples:
+        THR_ATT_WARN 10         (warning at 10° deviation)
+        THR_ATT_WARN 15         (more tolerant)
+    Result: Warning triggers when attitude deviates beyond this angle
+
+
+================================================================================
+ANOMALY RESPONSE COMMANDS
+================================================================================
+
+SAFE_MODE
+    Description: Enter safe mode - minimal power, sun pointing, all systems reset
+    Parameters: None
+    Example: SAFE_MODE
+    Result: 
+        - Operational mode set to SAFE
+        - Attitude set to sun pointing
+        - All attitudes reset to 0°
+        - Battery protected (min consumption)
+        - All anomaly flags cleared
+    Use When: Multiple failures, critical battery, unknown anomaly
+
+PWR_RESET
+    Description: Reset power system to nominal state
+    Parameters: None
+    Example: PWR_RESET
+    Result:
+        - Battery voltage restored to 12.6V (fully charged)
+        - Battery current reset to nominal 0.8A
+        - Power anomaly flag cleared
+    Use When: Battery voltage anomaly, power system fault
+
+ATT_RESET
+    Description: Reset attitude control system
+    Parameters: None
+    Example: ATT_RESET
+    Result:
+        - Roll, pitch, yaw all set to 0°
+        - Target attitude reset
+        - Attitude anomaly flag cleared
+    Use When: Attitude deviation, control system fault
+
+THERM_RESET
+    Description: Reset thermal control system
+    Parameters: None
+    Example: THERM_RESET
+    Result:
+        - Internal temperature restored to 20°C nominal
+        - Temperature anomaly flags cleared
+    Use When: Over-temperature, under-temperature condition
+
+COMM_RESET
+    Description: Reset communication system
+    Parameters: None
+    Example: COMM_RESET
+    Result:
+        - Communication signal restored to 95%
+        - Comm anomaly flag cleared
+    Use When: Communication degradation, signal loss
+
+CLEAR_CAUTIONS
+    Description: Clear all caution flags (only if telemetry is nominal)
+    Parameters: None
+    Example: CLEAR_CAUTIONS
+    Aliases: CLEAR_CAUT
+    Result:
+        - Clears caution flags if values are within nominal ranges
+        - Does NOT clear if telemetry is still out of range
+    Use When: After fixing issues, to acknowledge cautions
+
+BATT_CHARGE
+    Description: Boost battery charge by 1V
+    Parameters: None
+    Example: BATT_CHARGE
+    Result:
+        - Battery voltage increased by 1.0V (max 12.6V)
+        - Battery anomaly cleared
+    Use When: Battery low but not critical, need quick charge
+
+EMERG_SHUTDOWN
+    Description: Emergency shutdown of non-essential systems
+    Parameters: None
+    Example: EMERG_SHUTDOWN
+    Result:
+        - Mode changed to LOW_POWER
+        - Battery current reduced to 0.4A (minimum)
+    Use When: Critical battery situation, need to preserve power
+
+DIAG_MODE
+    Description: Enter diagnostic mode for system testing
+    Parameters: None
+    Example: DIAG_MODE
+    Result: Log entry created, diagnostic tests initiated
+    Use When: Investigating anomalies, routine maintenance
+
+
+================================================================================
+QUICK COMMAND SHORTCUTS (Button Commands)
+================================================================================
+
+CMD1 or CMD 1
+    Quick Action: Set nadir pointing
+    Equivalent: ATT_NADIR
+
+CMD2 or CMD 2
+    Quick Action: Set sun pointing
+    Equivalent: ATT_SUN_POINT
+
+CMD3 or CMD 3
+    Quick Action: Enter science mode
+    Equivalent: MODE_SCIENCE
+
+CMD4 or CMD 4
+    Quick Action: Enter low power mode
+    Equivalent: MODE_LOW_POWER
+
+CMD5 or CMD 5
+    Quick Action: Clear all cautions
+    Equivalent: CLEAR_CAUTIONS
+
+CMD6 or CMD 6
+    Quick Action: System health check
+    Result: Reports all systems nominal
+
+CMD7 or CMD 7
+    Quick Action: Set communication rate to 9600 bps
+    Result: Data rate set to maximum
+
+CMD8 or CMD 8
+    Quick Action: Reset watchdog timer
+    Result: Watchdog timer reset logged
+
+
+================================================================================
+COMMAND SYNTAX RULES
+================================================================================
+
+1. Commands are case-insensitive (ATT_NADIR = att_nadir = Att_Nadir)
+
+2. Parameters must be separated by spaces
+
+3. Numeric parameters:
+   - Voltages: 10.0 to 13.0 (V)
+   - Temperatures: -20 to 50 (°C)
+   - Angles: -180 to +180 (degrees)
+
+4. Multiple word commands use underscores (ATT_SLEW, not ATT SLEW)
+
+5. Parameters in <brackets> are required
+
+6. Parameters in [brackets] are optional (not used in current version)
+
+
+================================================================================
+TYPICAL COMMAND SEQUENCES
+================================================================================
+
+SCENARIO: Battery Low During Eclipse
+-------------------------------------
+1. ATT_SUN_POINT          (maximize solar exposure)
+2. MODE_LOW_POWER         (reduce consumption)
+3. Wait for sun exposure
+4. MODE_NOMINAL           (return to normal ops)
+
+SCENARIO: Attitude Deviation Detected
+--------------------------------------
+1. ATT_RESET              (reset attitude to 0°)
+2. ATT_NADIR              (resume nadir pointing)
+3. CLEAR_CAUTIONS         (clear caution flags)
+
+SCENARIO: Temperature Exceeds Limits
+-------------------------------------
+1. MODE_LOW_POWER         (reduce heat generation)
+2. ATT_SLEW 0 0 90        (different thermal orientation)
+3. Wait for cooling
+4. THERM_RESET            (reset thermal system)
+5. MODE_NOMINAL           (resume operations)
+
+SCENARIO: Multiple System Failures
+-----------------------------------
+1. SAFE_MODE              (emergency recovery)
+2. Wait for stabilization
+3. Assess systems via EVR log
+4. Gradually return to nominal:
+   a. MODE_NOMINAL
+   b. ATT_NADIR
+   c. CLEAR_CAUTIONS
+
+SCENARIO: Science Operation Pass
+---------------------------------
+1. ATT_SLEW 0 -15 0       (point at target)
+2. MODE_SCIENCE           (activate payload)
+3. Wait for data collection
+4. MODE_NOMINAL           (return to standard)
+5. ATT_NADIR              (return to Earth-facing)
+
+
+================================================================================
+TELEMETRY MONITORING THRESHOLDS
+================================================================================
+
+Battery Voltage (12V System):
+    Nominal:  12.0 - 12.6 V
+    Caution:  11.2 - 12.0 V (yellow)
+    Warning:  < 10.8 V (red)
+    Critical: < 10.5 V (emergency shutdown recommended)
+
+Internal Temperature:
+    Nominal:  5 - 35 °C
+    Caution:  0 - 5 °C or 35 - 40 °C (yellow)
+    Warning:  < 0 °C or > 40 °C (red)
+    Critical: < -5 °C or > 45 °C
+
+Attitude Deviation:
+    Nominal:  < 5° from target
+    Caution:  5 - 10° (yellow)
+    Warning:  > 10° (red)
+    Critical: > 15° (control authority lost)
+
+Communication Signal:
+    Nominal:  > 75%
+    Caution:  60 - 75% (yellow)
+    Warning:  < 60% (red)
+    Critical: < 40% (potential loss of signal)
+
+
+================================================================================
+COMMAND LOGGING
+================================================================================
+
+All commands are logged in the EVR (Event Record) log with:
+- Timestamp
+- Command text
+- Execution result
+- System state changes
+
+Example EVR entries:
+    2025-10-20 14:23:15 - CMD: Attitude mode set to NADIR pointing
+    2025-10-20 14:23:45 - CMD: Battery minimum threshold set to 10.8V
+    2025-10-20 14:24:12 - RESPONSE: Power system reset - battery restored to nominal
+
+
+================================================================================
+ERROR MESSAGES
+================================================================================
+
+Invalid Syntax:
+    "ERROR: Invalid <command> syntax. Use: <proper syntax>"
+
+Out of Range:
+    "ERROR: Parameter out of range. Valid range: <min> to <max>"
+
+Command Not Recognized:
+    "Command received: <text>" (acknowledged but no action taken)
+
+
+================================================================================
+NOTES
+================================================================================
+
+1. Commands execute immediately (no confirmation required for safety)
+2. For real missions, critical commands would require confirmation
+3. Threshold changes persist until reset or spacecraft reboot
+4. Safe mode can be exited by sending MODE_NOMINAL
+5. All angles use aerospace convention: 
+   - Roll: rotation about X (forward) axis
+   - Pitch: rotation about Y (starboard) axis  
+   - Yaw: rotation about Z (nadir) axis
+
+================================================================================
+END OF COMMAND REFERENCE
+================================================================================

@@ -1,0 +1,204 @@
+====================================================================================================
+VISUAL SYSTEM GUIDE
+Spacecraft Ground Command Display System
+====================================================================================================
+
+SYSTEM OVERVIEW:
+               
+    ┌─────────────────────────────────────────────────────────────────────────────┐
+    │                        LAUNCHER WINDOW                                       │
+    │                                                                               │
+    │                  Spacecraft Ground Command Display                           │
+    │                     LEO Spacecraft Telemetry System                          │
+    │                                                                               │
+    │                  ┌──────────────────────────────┐                           │
+    │                  │   Launch Both GUIs           │  ← Click this!            │
+    │                  └──────────────────────────────┘                           │
+    │                                                                               │
+    │                  Launch Control GUI Only                                     │
+    │                  Launch EID GUI Only                                         │
+    │                  Test Simulator Only                                         │
+    └─────────────────────────────────────────────────────────────────────────────┘
+                                     ↓
+                   ┌─────────────────┴─────────────────┐
+                   ↓                                   ↓
+
+    ┌──────────────────────────┐          ┌──────────────────────────────────────┐
+    │     CONTROL GUI          │          │          EID GUI                     │
+    ├──────────────────────────┤          ├──────────────────────────────────────┤
+    │ Control                  │          │ EID                                  │
+    ├──────────────────────────┤          ├──────────────────────────────────────┤
+    │ Telemetry Channel   Data │          │ [TLM]  [TLM]  [TLM]  [TLM]  [TLM]   │
+    │ Altitude           400 km│          │ [TLM]  [TLM]  [TLM]  [TLM]  [TLM]   │
+    │ Velocity          7.67 km│          │ [TLM]  [TLM]  [TLM]  [TLM]  [TLM]   │
+    │ Battery Voltage  28.5 V  │          │                                      │
+    │ ...                      │          │ (Colors: Green=OK, Yellow=Caution,   │
+    │                          │          │          Red=Warning)                │
+    ├──────────┬───────────────┤          ├──────────────────────┬───────────────┤
+    │ EVR Log  │ Caution &     │          │     EVR Log          │  Cmd Loaded   │
+    │          │ Warning       │          │                      │  [Cmd] [Cmd]  │
+    │ Events   │               │          │     Events           │  [Cmd] [Cmd]  │
+    │          │ ⚠ Warnings    │          │                      │  [Cmd] [Cmd]  │
+    │          │ ⚡ Cautions   │          │                      │  [Cmd] [Cmd]  │
+    ├──────────┴───────────────┤          └──────────────────────┴───────────────┘
+    │ Command Window           │
+    │ [Type command here] SEND │
+    └──────────────────────────┘
+
+
+DATA FLOW:
+                                                                                  
+    ┌────────────────────────────────────────────────────────────┐
+    │              SPACECRAFT SIMULATOR                          │
+    │          (telemetry_generator.py)                          │
+    │                                                            │
+    │  ┌──────────────────────────────────────────────┐         │
+    │  │  LEO Spacecraft at 400km Altitude             │         │
+    │  │                                               │         │
+    │  │  • Orbital Position (lat/lon)                │         │
+    │  │  • Orbital Velocity                          │         │
+    │  │  • Attitude Control (roll/pitch/yaw)         │         │
+    │  │  • Power System (battery/solar)              │         │
+    │  │  • Thermal Control                           │         │
+    │  │  • Communications                            │         │
+    │  │  • Environmental (pressure)                  │         │
+    │  └──────────────────────────────────────────────┘         │
+    │                         ↓                                  │
+    │         Telemetry Updated Every 100ms (10 Hz)             │
+    │                         ↓                                  │
+    │  ┌──────────────────────────────────────────────┐         │
+    │  │        Caution & Warning System              │         │
+    │  │  • Checks all parameters                     │         │
+    │  │  • Generates warnings (red)                  │         │
+    │  │  • Generates cautions (yellow)               │         │
+    │  └──────────────────────────────────────────────┘         │
+    │                         ↓                                  │
+    │  ┌──────────────────────────────────────────────┐         │
+    │  │           Event Recording (EVR)              │         │
+    │  │  • Logs all system events                    │         │
+    │  │  • Timestamps each event                     │         │
+    │  │  • Maintains last 100 events                 │         │
+    │  └──────────────────────────────────────────────┘         │
+    └──────────────────┬──────────────┬────────────────────────┘
+                       │              │
+             ┌─────────┴──────┐  ┌───┴──────────┐
+             ↓                ↓  ↓              ↓
+        Control GUI      EID GUI            Command
+        (reads data)  (reads data)          Processing
+
+
+ORBITAL SIMULATION:
+
+    Day Side (Sunlight)              Night Side (Eclipse)
+    ═══════════════════              ═══════════════════
+    
+    ☀ Solar Array: HIGH              ☾ Solar Array: ZERO
+      Battery: CHARGING                 Battery: DISCHARGING
+      Temp External: -80°C              Temp External: -150°C
+      Status: GREEN                     Status: YELLOW/RED
+      
+    Orbit Period: ~92 minutes
+    Altitude: 400 km
+    Velocity: 7.67 km/s
+    Inclination: ~51.6° (ISS-like)
+
+
+COLOR CODING SYSTEM:
+
+    ┌──────────┐
+    │  GREEN   │  All systems nominal - No action required
+    └──────────┘
+    
+    ┌──────────┐
+    │  YELLOW  │  Caution condition - Monitor closely
+    └──────────┘
+    
+    ┌──────────┐
+    │   RED    │  Warning condition - Immediate attention required
+    └──────────┘
+
+
+COMMAND FLOW:
+
+    User Types Command in Control GUI
+              ↓
+    Command sent to Spacecraft Simulator
+              ↓
+    Logged in EVR
+              ↓
+    (Future: Command execution affects spacecraft state)
+
+
+EMERGENCY RESPONSE:
+
+    User Clicks Red TLM Display in EID
+              ↓
+    Anomaly Response Window Opens
+              ↓
+    Options: Safe Mode, Power Reset, Attitude Hold, etc.
+              ↓
+    User selects response
+              ↓
+    Command sent to spacecraft
+              ↓
+    Event logged in EVR
+
+
+TYPICAL ORBIT CYCLE (92 minutes):
+
+    T+0:00  - Start over Pacific Ocean
+    T+23:00 - Day side, battery charging, solar high
+    T+46:00 - Enter eclipse, solar drops to zero
+    T+46:01 - Battery starts discharging (CAUTION)
+    T+46:30 - Battery voltage drops below 26V (YELLOW)
+    T+69:00 - Exit eclipse, solar returns
+    T+69:01 - Battery starts charging
+    T+92:00 - Complete one orbit, back to start
+
+
+FILE USAGE GUIDE:
+
+    For First Time:
+    - Read: README.md (comprehensive guide)
+    - Read: QUICKSTART.txt (get started fast)
+    
+    To Run:
+    - Windows: Double-click run.bat
+    - Any OS: python launcher.py
+    
+    For Development:
+    - Edit: telemetry_generator.py (add channels, change orbit)
+    - Edit: control_gui.py (modify left display)
+    - Edit: eid_gui.py (modify right display)
+    
+    For Reference:
+    - Check: PROJECT_SUMMARY.txt (what was built)
+    - Check: requirements.txt (dependencies)
+
+
+SYSTEM STATES:
+
+    NOMINAL:
+    - All displays GREEN
+    - Battery 26-28.5V
+    - Attitude within ±2°
+    - Temperature 18-28°C
+    - Solar array active (day side)
+    
+    CAUTION:
+    - Some displays YELLOW
+    - Battery 24.5-26V
+    - Attitude 2-4°
+    - Needs monitoring
+    
+    WARNING:
+    - Some displays RED
+    - Battery <24.5V
+    - Attitude >4°
+    - Immediate action required
+    - Consider anomaly response
+
+
+====================================================================================================
+READY TO USE! Double-click run.bat or run: python launcher.py
+====================================================================================================

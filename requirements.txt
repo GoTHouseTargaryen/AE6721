@@ -1,0 +1,34 @@
+# Spacecraft Ground Command Display System
+# Requirements
+
+# This project uses only Python standard library.
+# No additional packages need to be installed!
+
+# Minimum Python version: 3.6
+# Tested with: Python 3.8, 3.9, 3.10, 3.11, 3.12
+
+# Standard library modules used:
+# - tkinter (GUI framework - included with Python)
+# - threading (concurrent execution - included with Python)
+# - math (orbital calculations - included with Python)
+# - time (timing and delays - included with Python)
+# - datetime (timestamps - included with Python)
+# - json (data formatting - included with Python)
+# - random (simulation variations - included with Python)
+# - subprocess (launching GUIs - included with Python)
+# - os (file paths - included with Python)
+# - sys (system info - included with Python)
+
+# Note for Linux users:
+# If tkinter is not available, install it with:
+#   Ubuntu/Debian: sudo apt-get install python3-tk
+#   Fedora: sudo dnf install python3-tkinter
+#   Arch: sudo pacman -S tk
+
+# Note for macOS users:
+# tkinter should be included with Python installation
+# If not, install Python from python.org (not Homebrew)
+
+# Note for Windows users:
+# tkinter is included with all Python installations
+# Download from python.org or Microsoft Store

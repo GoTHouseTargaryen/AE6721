@@ -1,0 +1,73 @@
+================================================
+QUICKSTART GUIDE
+Spacecraft Ground Command Display System
+================================================
+
+EASIEST WAY TO RUN (Windows):
+-----------------------------
+1. Double-click: run.bat
+2. Click "Launch Both GUIs"
+3. Done!
+
+ALTERNATIVE (Any OS):
+--------------------
+1. Open terminal/command prompt
+2. Navigate to this folder
+3. Run: python launcher.py
+4. Click "Launch Both GUIs"
+
+WHAT YOU'LL SEE:
+---------------
+Two windows will open:
+
+CONTROL GUI (Left Panel):
+- Telemetry channels showing all spacecraft data
+- EVR Log with system events
+- Caution & Warning display
+- Command input window
+
+EID GUI (Right Panel):
+- 15 TLM displays with traffic light colors
+  * Green = All OK
+  * Yellow = Caution
+  * Red = Warning
+- EVR Log
+- 8 Command buttons
+- Click any TLM display for emergency commands
+
+WHAT TO WATCH:
+-------------
+1. Spacecraft orbits Earth every ~92 minutes
+2. Battery drains in eclipse, charges in sunlight
+3. Solar array current shows day/night cycle
+4. Attitude control keeps spacecraft oriented
+5. Warnings appear if parameters go out of range
+
+TRY THIS:
+--------
+1. Watch the latitude/longitude change
+2. Wait for solar array current to drop (eclipse)
+3. See battery voltage decrease in eclipse
+4. Type commands in Command Window
+5. Click command buttons in EID
+6. Click a red TLM display for emergency options
+
+SYSTEM REQUIREMENTS:
+-------------------
+- Python 3.6+ (usually pre-installed)
+- That's it! No other software needed.
+
+TROUBLESHOOTING:
+---------------
+Problem: "Python not found"
+Solution: Install from python.org
+
+Problem: Windows don't update
+Solution: Close all and restart
+
+Problem: Can't type commands
+Solution: Click in Command Window text box first
+
+For more details, see README.md
+
+================================================
