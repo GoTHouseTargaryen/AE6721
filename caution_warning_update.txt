@@ -1,0 +1,190 @@
+    def _check_cautions_warnings(self):
+        """Check for comprehensive caution and warning conditions"""
+        with self.lock:
+            self.cautions = []
+            self.warnings = []
+            
+            # === EPS (Electrical Power System) ===
+            # Battery Voltage
+            if self.eps_state['battery_voltage'] < self.thresholds['battery_voltage_min_warn']:
+                self.warnings.append("Battery voltage critical low")
+                self.anomaly_states['battery_low'] = True
+            elif self.eps_state['battery_voltage'] < self.thresholds['battery_voltage_min_caution']:
+                self.cautions.append("Battery voltage low")
+            if self.eps_state['battery_voltage'] > self.thresholds['battery_voltage_max_warn']:
+                self.warnings.append("Battery voltage exceeds maximum")
+            elif self.eps_state['battery_voltage'] > self.thresholds['battery_voltage_max_caution']:
+                self.cautions.append("Battery voltage high")
+                
+            # Battery SOC
+            if self.eps_state['battery_soc'] < self.thresholds['battery_soc_min_warn']:
+                self.warnings.append("Battery SOC critical")
+                self.anomaly_states['battery_low'] = True
+            elif self.eps_state['battery_soc'] < self.thresholds['battery_soc_min_caution']:
+                self.cautions.append("Battery SOC low")
+                
+            # Battery Temperature
+            if self.eps_state['battery_temp'] > self.thresholds['battery_temp_max_warn']:
+                self.warnings.append("Battery temperature high")
+                self.anomaly_states['eps_overtemp'] = True
+            elif self.eps_state['battery_temp'] > self.thresholds['battery_temp_max_caution']:
+                self.cautions.append("Battery temperature elevated")
+            if self.eps_state['battery_temp'] < self.thresholds['battery_temp_min_warn']:
+                self.warnings.append("Battery temperature critical low")
+            elif self.eps_state['battery_temp'] < self.thresholds['battery_temp_min_caution']:
+                self.cautions.append("Battery temperature low")
+                
+            # Battery Current
+            if abs(self.eps_state['battery_current']) > self.thresholds['battery_current_max_warn']:
+                self.warnings.append("Battery current exceeds maximum")
+            elif abs(self.eps_state['battery_current']) > self.thresholds['battery_current_max_caution']:
+                self.cautions.append("Battery current high")
+                
+            # Bus Current
+            if self.eps_state['bus_current'] > self.thresholds['bus_current_max_warn']:
+                self.warnings.append("Bus current exceeds maximum")
+            elif self.eps_state['bus_current'] > self.thresholds['bus_current_max_caution']:
+                self.cautions.append("Bus current high")
+            
+            # === ADCS (Attitude Determination & Control) ===
+            if self.adcs_state['enabled']:
+                # Attitude errors - reference SUN_POINT mode for sun-pointing missions
+                if self.adcs_state['mode'] == 'SUN_POINT':
+                    # Calculate pointing error from sun vector
+                    sun_pointing_error = abs(self.adcs_state['roll'] - (self.orbit_state['sun_angle'] / 2.0))
+                    pitch_error = abs(self.adcs_state['pitch'])
+                    yaw_error = abs(self.adcs_state['yaw'])
+                    max_error = max(sun_pointing_error, pitch_error, yaw_error)
+                    
+                    if max_error > self.thresholds['attitude_sun_point_warn']:
+                        self.warnings.append(f"Sun pointing error large ({max_error:.1f}°)")
+                        self.anomaly_states['attitude_deviation'] = True
+                    elif max_error > self.thresholds['attitude_sun_point_caution']:
+                        self.cautions.append(f"Sun pointing error moderate ({max_error:.1f}°)")
+                elif self.adcs_state['mode'] == 'NADIR':
+                    max_error = max(abs(self.adcs_state['roll']), abs(self.adcs_state['pitch']), abs(self.adcs_state['yaw']))
+                    if max_error > self.thresholds['attitude_nadir_warn']:
+                        self.warnings.append(f"Nadir pointing error large ({max_error:.1f}°)")
+                        self.anomaly_states['attitude_deviation'] = True
+                    elif max_error > self.thresholds['attitude_nadir_caution']:
+                        self.cautions.append(f"Nadir pointing error moderate ({max_error:.1f}°)")
+                        
+                # Attitude rates
+                max_rate = max(abs(self.adcs_state['roll_rate']), 
+                              abs(self.adcs_state['pitch_rate']), 
+                              abs(self.adcs_state['yaw_rate']))
+                if max_rate > self.thresholds['rate_max_warn']:
+                    self.warnings.append(f"Attitude rate excessive ({max_rate:.2f}°/s)")
+                elif max_rate > self.thresholds['rate_max_caution']:
+                    self.cautions.append(f"Attitude rate high ({max_rate:.2f}°/s)")
+                    
+                # RWS RPM
+                max_rpm = max(abs(self.adcs_state['rws_rpm_x']), 
+                             abs(self.adcs_state['rws_rpm_y']), 
+                             abs(self.adcs_state['rws_rpm_z']))
+                if max_rpm > self.thresholds['rws_rpm_max_warn']:
+                    self.warnings.append(f"Reaction wheel RPM at maximum ({max_rpm:.0f} RPM)")
+                elif max_rpm > self.thresholds['rws_rpm_max_caution']:
+                    self.cautions.append(f"Reaction wheel RPM high ({max_rpm:.0f} RPM)")
+                    
+                # RWS Momentum
+                max_momentum = max(abs(self.adcs_state['rws_momentum_x']), 
+                                  abs(self.adcs_state['rws_momentum_y']), 
+                                  abs(self.adcs_state['rws_momentum_z']))
+                if max_momentum > self.thresholds['rws_momentum_max_warn']:
+                    self.warnings.append(f"Reaction wheel momentum saturation ({max_momentum:.4f} Nms)")
+                elif max_momentum > self.thresholds['rws_momentum_max_caution']:
+                    self.cautions.append(f"Reaction wheel momentum high ({max_momentum:.4f} Nms)")
+            
+            # === TCS (Thermal Control System) ===
+            # Avionics Temperature
+            if self.tcs_state['temp_avi'] > self.thresholds['temp_avi_max_warn']:
+                self.warnings.append("Avionics temperature critical high")
+                self.anomaly_states['avi_overtemp'] = True
+            elif self.tcs_state['temp_avi'] > self.thresholds['temp_avi_max_caution']:
+                self.cautions.append("Avionics temperature elevated")
+            if self.tcs_state['temp_avi'] < self.thresholds['temp_avi_min_warn']:
+                self.warnings.append("Avionics temperature critical low")
+            elif self.tcs_state['temp_avi'] < self.thresholds['temp_avi_min_caution']:
+                self.cautions.append("Avionics temperature low")
+                
+            # EPS Temperature
+            if self.tcs_state['temp_eps'] > self.thresholds['temp_eps_max_warn']:
+                self.warnings.append("EPS temperature critical high")
+                self.anomaly_states['eps_overtemp'] = True
+            elif self.tcs_state['temp_eps'] > self.thresholds['temp_eps_max_caution']:
+                self.cautions.append("EPS temperature elevated")
+            if self.tcs_state['temp_eps'] < self.thresholds['temp_eps_min_warn']:
+                self.warnings.append("EPS temperature critical low")
+            elif self.tcs_state['temp_eps'] < self.thresholds['temp_eps_min_caution']:
+                self.cautions.append("EPS temperature low")
+                
+            # === COMM (Communications) ===
+            if self.comm_state['temp'] > self.thresholds['comm_temp_max_warn']:
+                self.warnings.append("COMM temperature critical high")
+                self.anomaly_states['comm_overtemp'] = True
+            elif self.comm_state['temp'] > self.thresholds['comm_temp_max_caution']:
+                self.cautions.append("COMM temperature elevated")
+                
+            # === PROP (Propulsion) ===
+            if self.prop_state['system_enabled']:
+                # Tank Pressure
+                if self.prop_state['tank_pressure'] < self.thresholds['prop_pressure_min_warn']:
+                    self.warnings.append("Propellant tank pressure critical low")
+                elif self.prop_state['tank_pressure'] < self.thresholds['prop_pressure_min_caution']:
+                    self.cautions.append("Propellant tank pressure low")
+                if self.prop_state['tank_pressure'] > self.thresholds['prop_pressure_max_warn']:
+                    self.warnings.append("Propellant tank pressure critical high")
+                elif self.prop_state['tank_pressure'] > self.thresholds['prop_pressure_max_caution']:
+                    self.cautions.append("Propellant tank pressure high")
+                    
+                # Tank Temperature
+                if self.prop_state['tank_temp'] < self.thresholds['prop_temp_min_warn']:
+                    self.warnings.append("Propellant tank temperature critical low")
+                elif self.prop_state['tank_temp'] < self.thresholds['prop_temp_min_caution']:
+                    self.cautions.append("Propellant tank temperature low")
+                if self.prop_state['tank_temp'] > self.thresholds['prop_temp_max_warn']:
+                    self.warnings.append("Propellant tank temperature critical high")
+                elif self.prop_state['tank_temp'] > self.thresholds['prop_temp_max_caution']:
+                    self.cautions.append("Propellant tank temperature high")
+                    
+                # Propellant Mass
+                if self.prop_state['propellant_mass'] < self.thresholds['propellant_mass_min_warn']:
+                    self.warnings.append(f"Propellant nearly depleted ({self.prop_state['propellant_mass']:.3f} kg)")
+                elif self.prop_state['propellant_mass'] < self.thresholds['propellant_mass_min_caution']:
+                    self.cautions.append(f"Propellant low ({self.prop_state['propellant_mass']:.3f} kg)")
+            
+            # === AVI (Avionics) ===
+            # CPU Load
+            if self.avi_state['cpu_load'] > self.thresholds['cpu_load_max_warn']:
+                self.warnings.append(f"CPU load critical ({self.avi_state['cpu_load']:.1f}%)")
+            elif self.avi_state['cpu_load'] > self.thresholds['cpu_load_max_caution']:
+                self.cautions.append(f"CPU load high ({self.avi_state['cpu_load']:.1f}%)")
+                
+            # CPU Temperature
+            if self.avi_state['cpu_temp'] > self.thresholds['cpu_temp_max_warn']:
+                self.warnings.append(f"CPU temperature critical ({self.avi_state['cpu_temp']:.1f}°C)")
+                self.anomaly_states['avi_overtemp'] = True
+            elif self.avi_state['cpu_temp'] > self.thresholds['cpu_temp_max_caution']:
+                self.cautions.append(f"CPU temperature elevated ({self.avi_state['cpu_temp']:.1f}°C)")
+                
+            # Memory Usage
+            if self.avi_state['memory_usage'] > self.thresholds['memory_usage_max_warn']:
+                self.warnings.append(f"Memory usage critical ({self.avi_state['memory_usage']:.1f}%)")
+            elif self.avi_state['memory_usage'] > self.thresholds['memory_usage_max_caution']:
+                self.cautions.append(f"Memory usage high ({self.avi_state['memory_usage']:.1f}%)")
+            
+            # === CDH (Command & Data Handling) ===
+            storage_pct = (self.cdh_state['storage_used'] / self.cdh_state['storage_total']) * 100.0
+            if storage_pct > self.thresholds['storage_max_warn']:
+                self.warnings.append(f"Storage critical ({storage_pct:.1f}%)")
+                self.anomaly_states['storage_full'] = True
+            elif storage_pct > self.thresholds['storage_max_caution']:
+                self.cautions.append(f"Storage high ({storage_pct:.1f}%)")
+                
+            # === TT&C (Tracking, Telemetry & Command) ===
+            if self.ttc_state['link_status'] == 'LOCKED':
+                if self.ttc_state['signal_strength'] < self.thresholds['signal_strength_min_warn']:
+                    self.warnings.append(f"Signal strength critical ({self.ttc_state['signal_strength']:.1f} dBm)")
+                elif self.ttc_state['signal_strength'] < self.thresholds['signal_strength_min_caution']:
+                    self.cautions.append(f"Signal strength low ({self.ttc_state['signal_strength']:.1f} dBm)")

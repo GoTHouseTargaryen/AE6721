@@ -231,7 +231,7 @@ class ControlGUI:
         for entry in evr_log[-20:]:
             self.evr_text.insert(tk.END, entry + "\n")
             
-        self.evr_text.see(tk.END)
+        # Don't auto-scroll - let user control scroll position
         self.evr_text.config(state=tk.DISABLED)
         
         # Update caution & warning

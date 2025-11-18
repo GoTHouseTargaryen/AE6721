@@ -113,6 +113,14 @@ class ExperimentGUI:
                  bg='#9b59b6', fg='white', font=('Segoe UI', 9, 'bold'),
                  width=18, height=2).grid(row=1, column=1, padx=5, pady=5)
         
+        # Info label for procedure instructions
+        procedure_info = tk.Label(action_frame, 
+                                 text="Note: 'Start Procedure' loads procedure for verification.\n"
+                                      "Test subject executes commands manually with paper procedure.",
+                                 font=('Segoe UI', 8, 'italic'),
+                                 bg='#3c3c3c', fg='#cccccc', justify=tk.LEFT)
+        procedure_info.pack(pady=5)
+        
         # Status Display
         status_frame = tk.LabelFrame(self.root, text="Experiment Status",
                                      font=('Segoe UI', 11, 'bold'),
@@ -177,14 +185,28 @@ class ExperimentGUI:
         messagebox.showinfo("Marked", "Anomaly resolution time recorded.")
         
     def start_procedure(self):
-        """Start timing a nominal procedure"""
+        """Start timing a nominal procedure - loads procedure for verification"""
         self.exp_mgr.start_procedure_timing()
-        messagebox.showinfo("Timing", "Procedure timing started.")
+        messagebox.showinfo("Procedure Started", 
+                          "Procedure timing started.\n\n"
+                          "The test subject should now execute the procedure\n"
+                          "they have in hand. Commands will be verified against\n"
+                          "the loaded procedure in the background.")
         
     def end_procedure(self):
         """End timing a nominal procedure"""
         self.exp_mgr.end_procedure_timing()
-        messagebox.showinfo("Timing", "Procedure timing completed and recorded.")
+        
+        # Get summary info
+        errors = len(self.exp_mgr.procedure_errors)
+        steps = self.exp_mgr.expected_step
+        total = len(self.exp_mgr.loaded_procedure) if self.exp_mgr.loaded_procedure else 0
+        
+        messagebox.showinfo("Procedure Completed", 
+                          f"Procedure timing ended.\n\n"
+                          f"Steps completed: {steps}/{total}\n"
+                          f"Procedure errors: {errors}\n\n"
+                          f"Full details logged to experiment file.")
         
     def update_status(self):
         """Update the status display"""

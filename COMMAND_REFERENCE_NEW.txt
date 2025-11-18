@@ -1,0 +1,483 @@
+================================================================================
+SPACECRAFT COMMAND REFERENCE
+6U CubeSat Ground Command Display System
+================================================================================
+
+This document describes all available commands for the 6U CubeSat simulator.
+Commands can be typed in the Control GUI command window or executed via
+buttons in the EID GUI.
+
+================================================================================
+ADCS (ATTITUDE DETERMINATION & CONTROL SYSTEM) COMMANDS
+================================================================================
+
+ADCS_ON
+    Description: Enable ADCS system
+    Parameters: None
+    Result: ADCS powered on, enters DETUMBLE mode by default
+    Use When: Initializing spacecraft after deployment
+
+ADCS_OFF
+    Description: Disable ADCS system
+    Parameters: None
+    Result: ADCS powered off, reaction wheels spin down
+    Use When: Safe mode, power conservation, maintenance
+
+ADCS_DETUMBLE
+    Description: Set ADCS to detumble mode
+    Parameters: None
+    Result: Spacecraft uses reaction wheels to reduce rotation rates
+    Use When: After deployment, after tumble event, recovering from saturation
+    Notes: Wheels absorb momentum, rates reduced to <0.1°/s in ~100-200 min
+
+ADCS_NADIR
+    Description: Point spacecraft nadir (Earth-facing)
+    Parameters: None
+    Result: Maintains roll/pitch/yaw near 0° pointing at Earth center
+    Use When: Normal operations, Earth observation
+    Accuracy: ±3° pointing accuracy
+
+ADCS_SUN_POINT
+    Description: Point spacecraft at sun
+    Parameters: None
+    Result: Maximizes solar panel exposure to sun
+    Use When: Battery low, eclipse recovery, power emergencies
+    Accuracy: ±5° pointing accuracy
+
+ADCS_INERTIAL
+    Description: Hold current inertial attitude
+    Parameters: None
+    Result: Maintains fixed orientation in space, no active pointing
+    Use When: Star observations, calibration, minimal wheel usage
+
+ADCS_RESET
+    Description: Reset attitude and rates to zero
+    Parameters: None
+    Result: Roll/pitch/yaw = 0°, all rates = 0°/s
+    Use When: Testing, recovering from anomaly
+    WARNING: Does not physically change spacecraft orientation
+
+ADCS_RWS_DESAT
+    Description: Desaturate reaction wheels using thrusters
+    Parameters: None
+    Prerequisites: PROP must be enabled with >0.05 kg fuel
+    Result: All wheel RPMs reduced to 2500 RPM nominal, consumes 0.02 kg fuel
+    Use When: Wheels approaching saturation (>4500 RPM)
+    Notes: Automatic desaturation occurs if PROP enabled and wheels >4500 RPM
+
+
+================================================================================
+REACTION WHEEL SATURATION MANAGEMENT
+================================================================================
+
+RWS Thresholds:
+    Nominal:   2000-4500 RPM (green)
+    Caution:   4500-5400 RPM (yellow) - within 25% of max
+    Warning:   5400-6000 RPM (red) - within 10% of max
+    Saturated: 6000 RPM - wheel at maximum capacity
+
+Automatic Desaturation:
+    - Triggers when any wheel >4500 RPM and PROP enabled
+    - Uses thrusters to offload momentum at 50 RPM/cycle
+    - Consumes 0.00001 kg fuel per axis per cycle
+    - Prevents saturation without ground intervention
+
+Control Loss (All 3 Wheels Saturated):
+    - Spacecraft loses attitude control
+    - Begins tumbling at ~0.1°/s² acceleration
+    - Automatic safe mode entry
+    - CRITICAL warning issued
+    - Requires PROP-enabled desaturation or manual ADCS_RWS_DESAT
+
+Recovery from Saturation:
+    1. Ensure PROP is enabled: PROP_ON
+    2. Wait for automatic desaturation (slow)
+       OR
+       Use manual desaturation: ADCS_RWS_DESAT (fast, uses more fuel)
+    3. Once wheels <6000 RPM, control restored
+    4. Exit safe mode: EXIT_SAFE_MODE
+    5. Re-enable ADCS: ADCS_ON (enters DETUMBLE)
+    6. Wait for detumble to complete
+    7. Resume normal pointing: ADCS_NADIR
+
+
+================================================================================
+EPS (ELECTRICAL POWER SYSTEM) COMMANDS
+================================================================================
+
+EPS_MODE_NOMINAL
+    Description: Normal power operations
+    Parameters: None
+    Power Draw: ~8-12W depending on active subsystems
+    Result: All systems available, normal operations
+
+EPS_MODE_LOW_POWER
+    Description: Low power conservation mode
+    Parameters: None
+    Power Draw: ~5-7W (ADCS/COMM reduced)
+    Result: Reduced functionality to conserve battery
+
+EPS_MODE_SCIENCE
+    Description: Science operations (high power)
+    Parameters: None
+    Power Draw: ~12-14W (payload active)
+    Result: Maximum science capability
+
+EPS_MODE_SAFE
+    Description: Enter safe mode (minimum power)
+    Parameters: None
+    Power Draw: ~3-5W (essentials only)
+    Result: ADCS disabled, COMM RX only, PROP disabled
+    Use When: Critical battery, major anomaly
+
+EPS_RESET
+    Description: Reset EPS to nominal state
+    Parameters: None
+    Result: Battery voltage/SOC restored, anomaly flags cleared
+    Use When: Testing, recovering from power anomaly
+
+
+================================================================================
+COMM (COMMUNICATIONS) COMMANDS
+================================================================================
+
+COMM_TX [timeout_seconds]
+    Description: Transmit mode only (SPACECRAFT NOT COMMANDABLE)
+    Parameters: Optional timeout in seconds (default: indefinite)
+    Power: 5W + (tx_power/30)*10W additional
+    Result: Transmits data, CANNOT receive commands
+    Use When: Downlinking science data
+    WARNING: In TX-only mode, spacecraft cannot accept commands!
+             Specify timeout or wait for safe mode auto-recovery
+    Examples:
+        COMM_TX 300     (TX for 5 minutes, then auto-return to RX)
+        COMM_TX 600     (TX for 10 minutes, then auto-return to RX)
+        COMM_TX         (TX indefinite - must wait for safe mode)
+
+COMM_RX
+    Description: Receive mode only (default)
+    Parameters: None
+    Power: 2W
+    Result: Receives commands, cannot transmit (EVRs not downlinked)
+    Use When: Normal operations, awaiting commands
+
+COMM_TX_RX
+    Description: Full duplex mode (transmit and receive simultaneously)
+    Parameters: None
+    Power: 6W + (tx_power/30)*8W additional
+    Result: Full communication capability (EVRs downlinked)
+    Use When: Real-time commanding during science ops, EVR retrieval
+    NOTE: Only mode that transmits EVR logs to ground
+    NOTE: Exits safe mode if commanded during safe mode
+
+COMM_STANDBY
+    Description: Communication standby (low power)
+    Parameters: None
+    Power: 0.5W
+    Result: Radio off, no communication
+    Use When: Safe mode, power emergency
+
+COMM_POWER_30
+    Description: Set transmit power to 30W (maximum)
+    Parameters: None
+    Result: Maximum range, highest power consumption
+    Use When: Low elevation passes, weak signal
+
+COMM_POWER_27
+    Description: Set transmit power to 27W
+    Parameters: None
+    Result: Good range, moderate power
+
+COMM_POWER_20
+    Description: Set transmit power to 20W (minimum)
+    Parameters: None
+    Result: Reduced range, power conservation
+    Use When: High elevation passes, battery low
+
+COMM_RESET
+    Description: Reset COMM to nominal state
+    Parameters: None
+    Result: Mode=RX, power=30W, temp=30°C, anomaly cleared
+
+
+================================================================================
+PROP (PROPULSION) COMMANDS
+================================================================================
+
+PROP_ON
+    Description: Enable propulsion system
+    Parameters: None
+    Power: 1.5W
+    Result: Thrusters armed, ready for maneuvers
+    Use When: Orbit maneuvers, RWS desaturation needed
+
+PROP_OFF
+    Description: Disable propulsion system
+    Parameters: None
+    Result: Thrusters disarmed, valve closed, system safe
+    Use When: Normal operations when no maneuvers needed
+
+PROP_VALVE_OPEN
+    Description: Open propellant valve (execute maneuver)
+    Parameters: None
+    Prerequisites: PROP must be enabled
+    Result: Propellant flow, delta-V accumulation, fuel consumption
+    Use When: Executing orbital maneuver
+    WARNING: Consumes 0.001 kg/cycle until valve closed
+
+PROP_VALVE_CLOSE
+    Description: Close propellant valve
+    Parameters: None
+    Result: Stops propellant flow
+    Use When: Maneuver complete
+
+
+================================================================================
+TCS (THERMAL CONTROL SYSTEM) COMMANDS
+================================================================================
+
+TCS_HEATER_AVI_ON
+    Description: Enable avionics heater
+    Parameters: None
+    Power: 2W
+    Result: Avionics compartment heated to >5°C
+    Use When: Temperature <5°C, eclipse operations
+    Note: Auto-enables at <5°C, auto-disables at >15°C
+
+TCS_HEATER_AVI_OFF
+    Description: Disable avionics heater
+    Parameters: None
+    Result: Avionics heater off (nominal state)
+    Use When: Temperature adequate, power conservation
+
+TCS_HEATER_EPS_ON
+    Description: Enable EPS/battery heater
+    Parameters: None
+    Power: 2W
+    Result: Battery compartment heated to >0°C
+    Use When: Battery temperature <0°C
+    Note: Auto-enables at <0°C, auto-disables at >10°C
+
+TCS_HEATER_EPS_OFF
+    Description: Disable EPS heater
+    Parameters: None
+    Result: Battery heater off (nominal state)
+    Use When: Temperature adequate, power conservation
+
+TCS_HEATER_PROP_ON
+    Description: Enable propulsion tank heater
+    Parameters: None
+    Power: 2W
+    Result: Propellant tank heated
+    Use When: PROP tank temperature low
+    Note: Manual control only - does NOT auto-enable
+
+TCS_HEATER_PROP_OFF
+    Description: Disable propulsion tank heater
+    Parameters: None
+    Result: PROP tank heater off (nominal state)
+    Use When: Temperature adequate, power conservation
+
+
+================================================================================
+AVI (AVIONICS) COMMANDS
+================================================================================
+
+AVI_REBOOT
+    Description: Reboot avionics computer
+    Parameters: None
+    Result: Boot count incremented, CPU load/memory usage reset
+    Use When: Software anomaly, high CPU load
+    Note: Does NOT reset spacecraft timer
+
+AVI_POWER_CYCLE
+    Description: Full power cycle of avionics
+    Parameters: None
+    Result: Boot count incremented, uptime reset to 0
+    Use When: Serious software fault, memory leak
+    Note: Resets spacecraft epoch time
+
+
+================================================================================
+SYSTEM COMMANDS
+================================================================================
+
+SAFE_MODE
+    Description: Enter automatic safe mode sequence
+    Parameters: None
+    Result: 
+        - EPS mode = SAFE
+        - ADCS disabled (reaction wheels maintain current RPM)
+        - COMM cycling: 60s RX → 60s TX → 30s TX_RX (repeats)
+        - PROP disabled
+        - CDH error count reset
+    Use When: Critical anomaly, RWS saturation, major failure
+    Notes: 
+        - Automatically triggered when all 3 reaction wheels saturate
+        - COMM cycles through modes for ground contact opportunities
+        - Reaction wheels NOT spun down (preserves momentum state)
+    Exit Conditions:
+        - EXIT_SAFE_MODE command
+        - ADCS_SUN_POINT command (auto-exits safe mode)
+        - COMM_TX_RX command (auto-exits safe mode)
+
+EXIT_SAFE_MODE
+    Description: Exit safe mode and return to nominal
+    Parameters: None
+    Prerequisites: Spacecraft must be in SAFE mode
+    Result: EPS mode = NOMINAL, COMM = RX, safe mode cycling stopped
+    Notes: Does NOT auto-enable ADCS or PROP - operator must do manually
+    Use When: Anomaly resolved, ready to resume operations
+    Alternative: Use ADCS_SUN_POINT or COMM_TX_RX to auto-exit safe mode
+
+SYS_RESET
+    Description: Complete system reset (restart simulation)
+    Parameters: None
+    Result: All states reset to initial conditions
+    Use When: Complete recovery needed, testing
+    WARNING: Loses all accumulated data
+
+
+================================================================================
+TYPICAL OPERATIONAL SCENARIOS
+================================================================================
+
+SCENARIO 1: Normal Startup After Deployment
+--------------------------------------------
+1. ADCS_ON              (enables ADCS in DETUMBLE mode)
+2. Wait ~100-200 min    (for detumble to complete)
+3. ADCS_NADIR           (enter normal pointing mode)
+4. PROP_ON              (arm thrusters for auto-desaturation)
+5. EPS_MODE_NOMINAL     (normal power operations)
+
+SCENARIO 2: Reaction Wheel Approaching Saturation
+--------------------------------------------------
+Caution appears: "RWS X-axis RPM high (4650 RPM)"
+
+Automatic response (if PROP enabled):
+- Desaturation automatically begins
+- Monitor RWS RPM decreasing over time
+- No action needed
+
+Manual response (if PROP not enabled):
+1. PROP_ON              (enable propulsion)
+2. Wait for auto-desat or use ADCS_RWS_DESAT
+3. Monitor wheels returning to nominal
+
+SCENARIO 3: All Wheels Saturated - Control Lost
+------------------------------------------------
+Warning: "CRITICAL: All reaction wheels saturated - ADCS control lost!"
+
+System response:
+- Spacecraft automatically enters SAFE_MODE
+- Begins tumbling
+- EVR: "CRITICAL ANOMALY: All RWS saturated, entering safe mode"
+
+Recovery:
+1. PROP_ON              (enable thrusters)
+2. ADCS_RWS_DESAT       (manual fast desaturation, uses 0.02kg fuel)
+3. Wait for wheels to desaturate
+4. EXIT_SAFE_MODE       (when ready to resume ops)
+5. ADCS_ON              (re-enable ADCS, enters DETUMBLE)
+6. Wait for detumble
+7. ADCS_NADIR           (resume normal pointing)
+
+SCENARIO 4: Battery Low During Eclipse
+---------------------------------------
+1. ADCS_SUN_POINT       (maximize solar exposure)
+2. EPS_MODE_LOW_POWER   (reduce consumption)
+3. COMM_STANDBY         (minimal COMM power)
+4. Wait for sunlight
+5. Monitor battery SOC increasing
+6. EPS_MODE_NOMINAL     (when SOC >30%)
+7. ADCS_NADIR           (resume normal ops)
+
+SCENARIO 5: Science Operations Pass
+------------------------------------
+1. Verify battery SOC >50%
+2. ADCS_NADIR           (point at target area)
+3. EPS_MODE_SCIENCE     (activate payload)
+4. COMM_TX_RX           (enable full duplex)
+5. Collect science data
+6. EPS_MODE_NOMINAL     (end science mode)
+7. COMM_RX              (reduce power)
+
+
+================================================================================
+TELEMETRY MONITORING REFERENCE
+================================================================================
+
+Battery State of Charge (SOC):
+    Nominal:  >50%
+    Caution:  20-50% (yellow)
+    Warning:  <20% (red)
+    Critical: <15% (consider safe mode)
+
+Battery Voltage:
+    Nominal:  11.5-12.6V
+    Caution:  10.5-11.5V (yellow)
+    Warning:  <10.5V (red)
+    Critical: <10.2V (emergency)
+
+Reaction Wheel RPM (per axis):
+    Nominal:   2000-4500 RPM
+    Caution:   4500-5400 RPM (within 25% of max)
+    Warning:   5400-6000 RPM (within 10% of max)
+    Saturated: 6000 RPM (at maximum)
+
+Attitude Rates (during pointing modes):
+    Nominal:  <0.5°/s
+    Caution:  0.5-1.0°/s
+    Warning:  >1.0°/s
+
+Propellant Mass:
+    Nominal:  >0.05 kg
+    Caution:  0.05-0.01 kg
+    Warning:  <0.01 kg (insufficient for desaturation)
+
+CPU Load:
+    Nominal:  <85%
+    Caution:  85-95%
+    Warning:  >95%
+
+
+================================================================================
+IMPORTANT NOTES
+================================================================================
+
+1. Reaction Wheel Saturation Prevention:
+   - Always keep PROP_ON during normal operations
+   - Automatic desaturation requires PROP enabled
+   - Monitor RWS RPM telemetry regularly
+   - Caution appears at 4500 RPM (25% margin to saturation)
+   - Warning appears at 5400 RPM (10% margin to saturation)
+
+2. Safe Mode:
+   - Automatically triggered on critical anomalies
+   - Protects spacecraft from damage
+   - Conserves power and awaits ground intervention
+   - Must manually exit with EXIT_SAFE_MODE
+
+3. Power Management:
+   - ADCS: 3W when enabled
+   - COMM TX: 5W + tx_power dependent
+   - COMM RX: 2W
+   - PROP: 1.5W when enabled
+   - Heaters: 2W each when on
+   - Total should not exceed solar generation in sunlight
+
+4. Detumble:
+   - Takes ~100-200 minutes (1-2 orbits)
+   - Wheels will spin up as they absorb momentum
+   - Rates should decrease from ±2°/s to <0.1°/s
+   - No attitude/rate warnings during DETUMBLE mode
+
+5. Command Timing:
+   - Commands execute immediately
+   - No confirmation required
+   - All commands logged in EVR
+   - Can queue multiple commands
+
+================================================================================
+END OF COMMAND REFERENCE
+================================================================================

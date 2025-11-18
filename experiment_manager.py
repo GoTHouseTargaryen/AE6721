@@ -35,6 +35,12 @@ class ExperimentManager:
         self.procedure_step = 0
         self.procedure_times = []
         
+        # Procedure verification (loaded but not auto-executed)
+        self.loaded_procedure = []
+        self.procedure_active = False
+        self.procedure_errors = []
+        self.expected_step = 0
+        
         # Data lock for thread safety
         self.lock = RLock()
         
@@ -70,9 +76,9 @@ class ExperimentManager:
         
         if nominal_procedure:
             self.nominal_procedure = nominal_procedure
-        # schedule first automatic procedure step a few seconds after start
-        self._procedure_interval_sec = 30
-        self._next_procedure_time = self.start_time + 5 if self.nominal_procedure else None
+        
+        # NOTE: Procedures are no longer auto-executed
+        # They must be loaded manually via start_procedure_timing()
         
         # Create log file with timestamp
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -116,20 +122,9 @@ class ExperimentManager:
         while time.time() < end_time and self.is_running:
             current_time = time.time()
             
-            # Auto-send nominal procedure steps on cadence
-            if self.nominal_procedure and self._next_procedure_time and current_time >= self._next_procedure_time:
-                with self.lock:
-                    if self.procedure_step < len(self.nominal_procedure):
-                        cmd = self.nominal_procedure[self.procedure_step]
-                        try:
-                            self.spacecraft.send_command(cmd)
-                            self.log_command(cmd, success=True)
-                            self.log_event("AUTO_PROCEDURE", f"Sent step {self.procedure_step + 1}/{len(self.nominal_procedure)}: {cmd}")
-                        except Exception as e:
-                            self.log_command(cmd, success=False, error_msg=str(e))
-                        self.procedure_step += 1
-                        self._next_procedure_time = current_time + self._procedure_interval_sec if self.procedure_step < len(self.nominal_procedure) else None
-
+            # NOTE: No auto-execution of procedures
+            # Commands are sent manually by test subject and verified against loaded procedure
+            
             # Check if it's time to inject anomaly
             if anomaly_time and current_time >= anomaly_time and not self.anomaly_injection_time:
                 self._inject_anomaly()
@@ -193,6 +188,10 @@ class ExperimentManager:
             else:
                 self.log_event("COMMAND_EXECUTED", f"Command #{self.command_count}: {command}")
                 
+            # Check against loaded procedure if active
+            if self.procedure_active and self.loaded_procedure:
+                self._verify_command_against_procedure(command)
+                
     def log_event(self, event_type, description):
         """Log a general event"""
         with self.lock:
@@ -234,11 +233,36 @@ class ExperimentManager:
                     self.log_event("ANOMALY_RESOLVED", 
                                  f"Anomaly resolved in {total_time:.2f}s (no detection marked)")
                     
+    def load_procedure(self, procedure_steps):
+        """
+        Load a procedure for background verification
+        
+        Args:
+            procedure_steps: List of command strings that define the correct procedure
+        """
+        with self.lock:
+            self.loaded_procedure = procedure_steps
+            self.expected_step = 0
+            self.procedure_errors = []
+            self.log_event("PROCEDURE_LOADED", f"Loaded procedure with {len(procedure_steps)} steps: {procedure_steps}")
+            
     def start_procedure_timing(self):
-        """Start timing a nominal procedure"""
+        """Start timing a nominal procedure (test subject begins executing)"""
         with self.lock:
             self.procedure_start_time = time.time()
-            self.log_event("PROCEDURE_START", "Nominal procedure started")
+            self.procedure_active = True
+            self.expected_step = 0
+            
+            # Load default 3-step procedure if none loaded
+            if not self.loaded_procedure:
+                self.loaded_procedure = [
+                    "ADCS_ON",
+                    "AVI_POWER_CYCLE", 
+                    "PROP_ON"
+                ]
+                self.log_event("PROCEDURE_LOADED", f"Default procedure loaded: {self.loaded_procedure}")
+            
+            self.log_event("PROCEDURE_START", f"Test subject beginning procedure execution - {len(self.loaded_procedure)} steps expected")
             
     def end_procedure_timing(self):
         """End timing a nominal procedure"""
@@ -247,8 +271,51 @@ class ExperimentManager:
                 self.procedure_end_time = time.time()
                 procedure_duration = self.procedure_end_time - self.procedure_start_time
                 self.procedure_times.append(procedure_duration)
-                self.log_event("PROCEDURE_COMPLETE", f"Nominal procedure completed in {procedure_duration:.2f}s")
+                
+                # Summary of procedure execution
+                total_errors = len(self.procedure_errors)
+                steps_completed = self.expected_step
+                steps_expected = len(self.loaded_procedure)
+                
+                self.log_event("PROCEDURE_COMPLETE", 
+                             f"Procedure ended after {procedure_duration:.2f}s | "
+                             f"Steps: {steps_completed}/{steps_expected} | "
+                             f"Errors: {total_errors}")
+                
                 self.procedure_start_time = None
+                self.procedure_active = False
+                
+    def _verify_command_against_procedure(self, command):
+        """
+        Verify if a command matches the expected step in the loaded procedure
+        
+        Args:
+            command: The command string that was just executed
+        """
+        if not self.loaded_procedure or self.expected_step >= len(self.loaded_procedure):
+            # No procedure loaded or already completed all steps
+            return
+            
+        expected_command = self.loaded_procedure[self.expected_step]
+        
+        if command == expected_command:
+            # Correct command
+            self.expected_step += 1
+            self.log_event("PROCEDURE_STEP_CORRECT", 
+                         f"✓ Step {self.expected_step}/{len(self.loaded_procedure)} correct: {command}")
+        else:
+            # Wrong command - this is an error
+            error_entry = {
+                'step_number': self.expected_step + 1,
+                'expected_command': expected_command,
+                'actual_command': command,
+                'timestamp': datetime.now().isoformat()
+            }
+            self.procedure_errors.append(error_entry)
+            
+            self.log_event("PROCEDURE_STEP_ERROR", 
+                         f"✗ Step {self.expected_step + 1}/{len(self.loaded_procedure)} ERROR - "
+                         f"Expected: '{expected_command}', Got: '{command}'")
                 
     def _end_scenario(self):
         """End the scenario and calculate metrics"""
@@ -268,6 +335,8 @@ class ExperimentManager:
                 'command_error_rate': len(self.command_errors) / max(1, self.command_count),
                 'procedures_completed': len(self.procedure_times),
                 'average_procedure_time': sum(self.procedure_times) / len(self.procedure_times) if self.procedure_times else 0,
+                'procedure_step_errors': len(self.procedure_errors),
+                'procedure_error_details': self.procedure_errors,
             }
             
             if self.scenario_type == 'anomaly':
@@ -310,8 +379,15 @@ class ExperimentManager:
             status += f"Commands: {self.command_count}\n"
             status += f"Errors: {len(self.command_errors)}\n"
             
+            if self.procedure_active and self.loaded_procedure:
+                status += f"\nProcedure Active:\n"
+                status += f"  Step {self.expected_step}/{len(self.loaded_procedure)}\n"
+                status += f"  Errors: {len(self.procedure_errors)}\n"
+                if self.expected_step < len(self.loaded_procedure):
+                    status += f"  Next: {self.loaded_procedure[self.expected_step]}\n"
+            
             if self.scenario_type == 'anomaly' and self.anomaly_injection_time:
-                status += "Anomaly: ACTIVE\n"
+                status += "\nAnomaly: ACTIVE\n"
                 if self.anomaly_detected_time:
                     status += "Status: DETECTED\n"
                 if self.anomaly_resolved_time:
