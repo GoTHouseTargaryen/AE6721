@@ -50,6 +50,20 @@ ADCS_INERTIAL
     Result: Maintains fixed orientation in space, no active pointing
     Use When: Star observations, calibration, minimal wheel usage
 
+ADCS_GO_TO <roll> <pitch> <yaw>
+    Description: Slew spacecraft to specific attitude and hold
+    Parameters: 
+        roll  - Roll angle in degrees (-180 to +180)
+        pitch - Pitch angle in degrees (-180 to +180)
+        yaw   - Yaw angle in degrees (-180 to +180)
+    Examples:
+        ADCS_GO_TO 0 0 0       (align to reference frame)
+        ADCS_GO_TO 45 0 0      (roll 45 degrees)
+        ADCS_GO_TO 0 -30 90    (pitch down 30°, yaw 90°)
+    Result: Spacecraft slews to target and holds attitude
+    Use When: Need specific orientation for imaging, comms, or maneuvers
+    Note: Automatically enables ADCS in FINE_HOLD mode
+
 ADCS_RESET
     Description: Reset attitude and rates to zero
     Parameters: None
@@ -58,12 +72,18 @@ ADCS_RESET
     WARNING: Does not physically change spacecraft orientation
 
 ADCS_RWS_DESAT
-    Description: Desaturate reaction wheels using thrusters
+    Description: Desaturate reaction wheels using thrusters (manual)
     Parameters: None
-    Prerequisites: PROP must be enabled with >0.05 kg fuel
+    Prerequisites: 
+        - PROP must be enabled (PROP_ON)
+        - Catalyst must be ready (temp ≥ 300°C)
+        - Fuel available (>0.05 kg)
     Result: All wheel RPMs reduced to 2500 RPM nominal, consumes 0.02 kg fuel
     Use When: Wheels approaching saturation (>4500 RPM)
-    Notes: Automatic desaturation occurs if PROP enabled and wheels >4500 RPM
+    Notes: 
+        - Instant desaturation (vs slow automatic)
+        - Uses more fuel than automatic desaturation
+        - Catalyst heater must be on and warm for ~2-3 minutes
 
 
 ================================================================================
@@ -77,10 +97,23 @@ RWS Thresholds:
     Saturated: 6000 RPM - wheel at maximum capacity
 
 Automatic Desaturation:
-    - Triggers when any wheel >4500 RPM and PROP enabled
-    - Uses thrusters to offload momentum at 50 RPM/cycle
+    - Triggers when any wheel >4500 RPM AND PROP enabled AND catalyst ready
+    - Phase 1: Slews to desaturation attitude (R=0° P=0° Y=0°)
+    - Phase 2: Uses thrusters to offload momentum at 50 RPM/cycle
     - Consumes 0.00001 kg fuel per axis per cycle
     - Prevents saturation without ground intervention
+    - Requires catalyst temperature ≥ 300°C (ready state)
+    - Warm-up time: 2-3 minutes after catalyst heater enabled
+
+Desaturation Sequence:
+    1. Wheels exceed 4500 RPM threshold
+    2. System checks: PROP enabled? Catalyst ready (300°C+)? Fuel available?
+    3. If all checks pass, initiate desaturation sequence:
+       a. Slew spacecraft to desaturation attitude (R=0° P=0° Y=0°)
+       b. Once aligned (within 5° tolerance), begin thruster firing
+       c. Offload momentum from reaction wheels
+       d. Continue until all wheels reach 2000 RPM ± 100 RPM
+    4. Close valve, complete desaturation
 
 Control Loss (All 3 Wheels Saturated):
     - Spacecraft loses attitude control
@@ -91,14 +124,18 @@ Control Loss (All 3 Wheels Saturated):
 
 Recovery from Saturation:
     1. Ensure PROP is enabled: PROP_ON
-    2. Wait for automatic desaturation (slow)
+    1a. Wait for catalyst to warm up (2-3 minutes to reach 300°C+)
+    1b. Check PROP telemetry: catalyst_ready should be True
+    2. Wait for automatic desaturation (slower, fuel-efficient)
+       - Spacecraft will slew to R=0° P=0° Y=0° first
+       - Then fires thrusters to desaturate
        OR
-       Use manual desaturation: ADCS_RWS_DESAT (fast, uses more fuel)
+       Use manual desaturation: ADCS_RWS_DESAT (instant, uses more fuel)
     3. Once wheels <6000 RPM, control restored
     4. Exit safe mode: EXIT_SAFE_MODE
     5. Re-enable ADCS: ADCS_ON (enters DETUMBLE)
     6. Wait for detumble to complete
-    7. Resume normal pointing: ADCS_NADIR
+    7. Resume normal pointing: ADCS_NADIR or ADCS_GO_TO <r> <p> <y>
 
 
 ================================================================================

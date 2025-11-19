@@ -117,11 +117,12 @@ class ControlGUI:
         self.cw_text = scrolledtext.ScrolledText(
             cw_frame,
             height=10,
-            width=25,
+            width=50,
             font=self.font_data,
             bg=self.colors['bg_panel'],
             fg=self.colors['fg_main'],
             insertbackground=self.colors['fg_main'],
+            wrap=tk.WORD,
             state=tk.DISABLED
         )
         self.cw_text.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
@@ -210,6 +211,10 @@ class ControlGUI:
         """Update all displays with latest data"""
         # Update telemetry channels
         channels = spacecraft.get_telemetry_channels()
+        
+        # Save scroll position
+        telemetry_scroll_pos = self.telemetry_text.yview()
+        
         self.telemetry_text.config(state=tk.NORMAL)
         self.telemetry_text.delete(1.0, tk.END)
         
@@ -219,23 +224,34 @@ class ControlGUI:
         
         for channel_name, data in channels:
             self.telemetry_text.insert(tk.END, f"{channel_name:<25} {data:>10}\n")
-            
+        
+        # Restore scroll position
+        self.telemetry_text.yview_moveto(telemetry_scroll_pos[0])
         self.telemetry_text.config(state=tk.DISABLED)
         
         # Update EVR log
         evr_log = spacecraft.get_evr_log()
+        
+        # Save scroll position
+        evr_scroll_pos = self.evr_text.yview()
+        
         self.evr_text.config(state=tk.NORMAL)
         self.evr_text.delete(1.0, tk.END)
         
         # Show last 20 entries
         for entry in evr_log[-20:]:
             self.evr_text.insert(tk.END, entry + "\n")
-            
-        # Don't auto-scroll - let user control scroll position
+        
+        # Restore scroll position
+        self.evr_text.yview_moveto(evr_scroll_pos[0])
         self.evr_text.config(state=tk.DISABLED)
         
         # Update caution & warning
         cautions, warnings = spacecraft.get_cautions_warnings()
+        
+        # Save scroll position
+        cw_scroll_pos = self.cw_text.yview()
+        
         self.cw_text.config(state=tk.NORMAL)
         self.cw_text.delete(1.0, tk.END)
         
@@ -258,6 +274,8 @@ class ControlGUI:
                                foreground=self.colors['bg_caution'], 
                                font=self.font_data)
         
+        # Restore scroll position
+        self.cw_text.yview_moveto(cw_scroll_pos[0])
         self.cw_text.config(state=tk.DISABLED)
         
         # Schedule next update (1 Hz)

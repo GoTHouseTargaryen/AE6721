@@ -1,0 +1,317 @@
+================================================================================
+DUAL SOLAR ARRAY AND BATTERY SYSTEM GUIDE
+6U CubeSat Ground Command Display System
+================================================================================
+
+SYSTEM OVERVIEW
+================================================================================
+
+The spacecraft features an independent dual power system for redundancy:
+
+    Solar Array A  ──charges──►  Battery A  ─┐
+                                              ├──► Bus Voltage
+    Solar Array B  ──charges──►  Battery B  ─┘
+                   └─cross-charging (optional)─┘
+
+Key Features:
+- Two independent solar arrays (15W max each, 30W total)
+- Two independent batteries (separate voltage/SOC tracking)
+- Arrays start UNDEPLOYED (must deploy manually after launch)
+- Cross-charging disabled by default (independent operation)
+- Bus voltage is average of both battery voltages
+
+
+INITIAL STATE (POST-LAUNCH)
+================================================================================
+
+Solar Arrays:
+    Array A: STOWED (not generating power)
+    Array B: STOWED (not generating power)
+
+Batteries:
+    Battery A: 11.8V @ 85% SOC
+    Battery B: 11.8V @ 85% SOC
+
+Cross-Charging: DISABLED
+
+Power Source: Both batteries discharging to supply bus
+
+⚠️  CRITICAL: Deploy solar arrays within first orbit or batteries will drain!
+
+
+DEPLOYMENT PROCEDURE
+================================================================================
+
+1. Deploy Solar Array A:
+   Command: EPS_DEPLOY_ARRAY_A
+   Result: Array A deploys, begins charging Battery A
+   
+2. Deploy Solar Array B:
+   Command: EPS_DEPLOY_ARRAY_B
+   Result: Array B deploys, begins charging Battery B
+
+3. (Optional) Enable cross-charging if needed:
+   Command: EPS_CROSS_CHARGE_ENABLE
+
+Recommended: Deploy both arrays immediately after confirming spacecraft health
+
+
+NORMAL OPERATIONS
+================================================================================
+
+Independent Mode (Default):
+- Array A charges Battery A only
+- Array B charges Battery B only
+- No cross-charging between batteries
+- Maximum reliability (fault in one system doesn't affect other)
+- Both batteries discharge to supply bus load (load split 50/50)
+
+Example Telemetry:
+    solar_array_a_deployed: True
+    solar_array_b_deployed: True
+    solar_power_a: 14.2W (varies with sun angle)
+    solar_power_b: 14.5W (varies with sun angle)
+    battery_a_voltage: 12.1V
+    battery_a_soc: 89%
+    battery_b_voltage: 12.0V
+    battery_b_soc: 87%
+    cross_charging_enabled: False
+    bus_voltage: 12.05V (average of both batteries)
+
+
+CROSS-CHARGING MODE
+================================================================================
+
+When to Enable:
+- One battery significantly lower than the other
+- Suspected partial failure of one solar array
+- Need to balance batteries for critical maneuver
+
+Command: EPS_CROSS_CHARGE_ENABLE
+
+How It Works:
+- Higher voltage battery transfers charge to lower voltage battery
+- Transfer rate proportional to voltage difference
+- Batteries automatically balance over time
+- Both arrays still charge their respective batteries
+
+Example Scenario:
+    Initial State:
+        Battery A: 11.5V @ 75% SOC
+        Battery B: 12.2V @ 92% SOC
+    
+    After enabling cross-charging:
+        Battery B transfers charge to Battery A
+        Both converge toward average (~11.85V, ~83% SOC)
+
+When to Disable:
+- Batteries balanced
+- Suspected battery fault (isolate faulty battery)
+- Return to maximum reliability mode
+
+Command: EPS_CROSS_CHARGE_DISABLE
+
+
+POWER GENERATION
+================================================================================
+
+Solar Array Output (Per Array):
+    Eclipse:                0.0W (no sunlight)
+    Sun Pointing:          15.0W max (optimal angle)
+    Nadir Pointing:        10.5W (70% efficiency)
+    Inertial/Other:         7.0W (variable)
+
+Each array only generates power when DEPLOYED:
+    Stowed:     0.0W (regardless of sun exposure)
+    Deployed:   0-15W (depends on sun angle and pointing mode)
+
+Total System Power:
+    Maximum:    30W (both arrays deployed, sun pointing, not eclipsed)
+    Typical:    20W (both arrays deployed, nadir pointing)
+    Eclipse:     0W (both arrays deployed but no sunlight)
+
+
+BATTERY CHARGING
+================================================================================
+
+Charging Path:
+    Array A → Battery A (independent)
+    Array B → Battery B (independent)
+    Optional: Battery B ↔ Battery A (when cross-charging enabled)
+
+Charge Rate:
+    Maximum: 2.0A per battery (when excess solar power available)
+    Rate depends on: solar power - (bus load / 2)
+
+SOC Limits:
+    Maximum: 100% (fully charged)
+    Nominal: 80-95%
+    Caution: <20%
+    Critical: <15%
+
+Voltage Range:
+    Fully Charged: 12.6V
+    Nominal: 11.8-12.2V
+    Caution: 10.5-11.0V
+    Critical: <10.2V
+
+
+BUS VOLTAGE CALCULATION
+================================================================================
+
+Bus voltage is the average of both battery voltages:
+
+    bus_voltage = (battery_a_voltage + battery_b_voltage) / 2
+
+Examples:
+    Battery A: 12.0V, Battery B: 12.0V  →  Bus: 12.0V
+    Battery A: 11.5V, Battery B: 12.5V  →  Bus: 12.0V
+    Battery A: 10.8V, Battery B: 12.2V  →  Bus: 11.5V
+
+Bus load is split evenly between batteries (50/50)
+
+
+TELEMETRY MONITORING
+================================================================================
+
+Key Parameters (EID GUI EPS Display):
+    mode                        - EPS power mode (NOMINAL/LOW_POWER/SCIENCE/SAFE)
+    solar_array_a_deployed      - True/False (is Array A deployed?)
+    solar_array_b_deployed      - True/False (is Array B deployed?)
+    battery_a_voltage           - Battery A voltage (V)
+    battery_a_soc               - Battery A state of charge (%)
+    battery_b_voltage           - Battery B voltage (V)
+    battery_b_soc               - Battery B state of charge (%)
+    cross_charging_enabled      - True/False (is cross-charging active?)
+    bus_voltage                 - Combined bus voltage (V)
+    bus_current                 - Total bus current draw (A)
+
+Additional Telemetry (Full State):
+    solar_voltage_a             - Array A output voltage (V)
+    solar_current_a             - Array A output current (A)
+    solar_power_a               - Array A power generation (W)
+    solar_voltage_b             - Array B output voltage (V)
+    solar_current_b             - Array B output current (A)
+    solar_power_b               - Array B power generation (W)
+    battery_a_current           - Battery A charge/discharge current (A, negative=charging)
+    battery_a_temp              - Battery A temperature (°C)
+    battery_b_current           - Battery B charge/discharge current (A, negative=charging)
+    battery_b_temp              - Battery B temperature (°C)
+
+
+CAUTIONS AND WARNINGS
+================================================================================
+
+System monitors BOTH batteries independently:
+
+Battery A or B Voltage:
+    Critical (<10.2V):  WARNING - "Battery A/B voltage critical low"
+    Low (<10.5V):       CAUTION - "Battery A/B voltage low"
+
+Battery A or B SOC:
+    Critical (<15%):    WARNING - "Battery A/B SOC critical"
+    Low (<20%):         CAUTION - "Battery A/B SOC low"
+
+Battery A or B Temperature:
+    Hot (>50°C):        WARNING - "Battery A/B temperature high"
+    Warm (>45°C):       CAUTION - "Battery A/B temperature elevated"
+    Cold (<-15°C):      WARNING - "Battery A/B temperature critical low"
+    Cool (<-10°C):      CAUTION - "Battery A/B temperature low"
+
+Battery A or B Current:
+    High (>3.0A):       WARNING - "Battery A/B current exceeds maximum"
+    Elevated (>2.7A):   CAUTION - "Battery A/B current high"
+
+
+TROUBLESHOOTING SCENARIOS
+================================================================================
+
+Scenario 1: Both Batteries Draining
+    Symptoms: Both SOC decreasing, solar_power_a and solar_power_b = 0W
+    Diagnosis: Arrays not deployed or in eclipse
+    Solution: 
+        1. Check solar_array_a_deployed and solar_array_b_deployed
+        2. If False, send EPS_DEPLOY_ARRAY_A and EPS_DEPLOY_ARRAY_B
+        3. Check orbit.eclipse - if True, wait for sunlight
+        4. Consider ATT_SUN_POINT to maximize solar power
+
+Scenario 2: One Battery Not Charging
+    Symptoms: Battery A charging normally, Battery B draining
+    Diagnosis: Array B not deployed or faulty
+    Solution:
+        1. Check solar_array_b_deployed - if False, send EPS_DEPLOY_ARRAY_B
+        2. Check solar_power_b - if 0W in sunlight, array may be faulty
+        3. Enable cross-charging: EPS_CROSS_CHARGE_ENABLE
+        4. Battery A will charge Battery B via cross-charging
+
+Scenario 3: Unbalanced Batteries
+    Symptoms: Battery A at 92% SOC, Battery B at 68% SOC
+    Diagnosis: One array producing less power (shadowing, damage, or late deployment)
+    Solution:
+        1. Send EPS_CROSS_CHARGE_ENABLE to balance batteries
+        2. Monitor for balance over several orbits
+        3. Consider ATT_SUN_POINT to maximize charging
+        4. Once balanced, can send EPS_CROSS_CHARGE_DISABLE if desired
+
+Scenario 4: One Battery Failing
+    Symptoms: Battery B voltage dropping rapidly, won't charge, or overheating
+    Diagnosis: Battery B internal fault
+    Solution:
+        1. Ensure EPS_CROSS_CHARGE_DISABLE (isolate failing battery)
+        2. Rely on Battery A and Array A only
+        3. Enter MODE_LOW_POWER to reduce load
+        4. Avoid high power modes (SCIENCE)
+        5. Monitor battery_a_soc closely - system operating on single battery
+
+
+COMMANDS SUMMARY
+================================================================================
+
+EPS_DEPLOY_ARRAY_A          Deploy solar array A (enables power generation)
+EPS_DEPLOY_ARRAY_B          Deploy solar array B (enables power generation)
+EPS_CROSS_CHARGE_ENABLE     Enable cross-charging between batteries
+EPS_CROSS_CHARGE_DISABLE    Disable cross-charging (return to independent mode)
+EPS_MODE_NOMINAL            Normal power mode (~10W)
+EPS_MODE_LOW_POWER          Low power mode (~7W)
+EPS_MODE_SCIENCE            High power mode (~15W)
+EPS_MODE_SAFE               Safe mode (~5W, minimal systems)
+EPS_RESET                   Reset both batteries to 85% SOC, 11.8V
+
+
+BEST PRACTICES
+================================================================================
+
+1. DEPLOY EARLY
+   - Deploy both arrays within first orbit after launch
+   - Batteries will drain if arrays remain stowed
+
+2. DEFAULT TO INDEPENDENT
+   - Keep cross_charging_enabled = False for normal ops
+   - Maximum reliability - fault isolation
+   - Only enable cross-charging when balancing needed
+
+3. MONITOR BOTH BATTERIES
+   - Watch both battery_a_soc and battery_b_soc
+   - Don't rely on just bus_voltage (it's an average)
+   - One battery can be critical while bus_voltage appears nominal
+
+4. BALANCE BEFORE CRITICAL MANEUVERS
+   - Enable cross-charging before high-power activities
+   - Ensures maximum available energy from both batteries
+   - Disable after maneuver for fault isolation
+
+5. SUN POINTING IN ECLIPSE RECOVERY
+   - If both batteries low (<30%), immediately:
+     ATT_SUN_POINT (maximize charging)
+     EPS_MODE_LOW_POWER (minimize consumption)
+     Wait for batteries to recover (>50%)
+
+6. FAULT ISOLATION
+   - If one battery failing, disable cross-charging immediately
+   - Prevents failing battery from draining healthy battery
+   - Operate on single battery/array until ground analysis
+
+
+================================================================================
+END OF DUAL POWER SYSTEM GUIDE
+================================================================================

@@ -1,5 +1,57 @@
 # System Update - New Features Implemented
 
+## Latest Update - Dual Solar Array and Battery System (Current)
+
+### Major Feature: Independent Dual Power Architecture
+The spacecraft now features a complete dual power system with independent solar arrays and batteries:
+
+**System Overview**:
+- **Solar Array A** → Charges → **Battery A**
+- **Solar Array B** → Charges → **Battery B**
+- **Optional Cross-Charging** between batteries
+- **Bus Voltage** = Average of both battery voltages
+
+**Key Changes**:
+- Arrays start **UNDEPLOYED** (must deploy manually after launch)
+- Two independent 15W solar arrays (30W total system)
+- Two independent batteries with separate voltage/SOC tracking
+- Cross-charging disabled by default (independent operation)
+- Individual cautions/warnings for each battery
+
+**New Commands**:
+- `EPS_DEPLOY_ARRAY_A` - Deploy solar array A (enables power generation)
+- `EPS_DEPLOY_ARRAY_B` - Deploy solar array B (enables power generation)
+- `EPS_CROSS_CHARGE_ENABLE` - Enable cross-charging between batteries
+- `EPS_CROSS_CHARGE_DISABLE` - Disable cross-charging (default)
+
+**New Telemetry**:
+- `solar_array_a_deployed` / `solar_array_b_deployed` - Deployment status
+- `solar_power_a` / `solar_power_b` - Individual array power output (W)
+- `battery_a_voltage` / `battery_b_voltage` - Individual battery voltages (V)
+- `battery_a_soc` / `battery_b_soc` - Individual battery state of charge (%)
+- `battery_a_current` / `battery_b_current` - Individual charge/discharge current (A)
+- `battery_a_temp` / `battery_b_temp` - Individual battery temperatures (°C)
+- `cross_charging_enabled` - Cross-charging status (True/False)
+
+**Operational Notes**:
+- ⚠️ **CRITICAL**: Deploy both arrays immediately after launch or batteries will drain!
+- Default independent mode provides maximum reliability (fault isolation)
+- Enable cross-charging to balance batteries when needed
+- Can operate on single battery/array if one fails
+- Monitor BOTH batteries independently - bus_voltage is an average
+
+**Documentation**:
+- See `DUAL_POWER_SYSTEM_GUIDE.txt` for complete operational guide
+- See `DUAL_POWER_IMPLEMENTATION_SUMMARY.txt` for technical details
+- See `COMMAND_REFERENCE.txt` for command documentation
+
+**Files Modified**:
+- `telemetry_generator.py` - EPS state, update logic, commands, warnings
+- `eid_gui.py` - Display and command menu updates
+- `COMMAND_REFERENCE.txt` - New command documentation
+
+---
+
 ## Changes Made (October 20, 2025)
 
 ### 1. Data Rate Changed to 1 Hz

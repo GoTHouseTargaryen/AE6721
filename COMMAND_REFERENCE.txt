@@ -146,10 +146,234 @@ PWR_RESET
     Parameters: None
     Example: PWR_RESET
     Result:
-        - Battery voltage restored to 12.6V (fully charged)
-        - Battery current reset to nominal 0.8A
+        - Battery A voltage restored to 11.8V (85% SOC)
+        - Battery B voltage restored to 11.8V (85% SOC)
         - Power anomaly flag cleared
     Use When: Battery voltage anomaly, power system fault
+
+EPS_DEPLOY_ARRAY_A
+    Description: Deploy solar array A
+    Parameters: None
+    Example: EPS_DEPLOY_ARRAY_A
+    Result:
+        - Solar array A deployed
+        - Array A begins generating power from sunlight (0-15W depending on sun angle)
+        - EVR log entry created
+    Use When: Initial deployment after launch, or after array stowage
+    Note: Arrays must be deployed to generate power
+
+EPS_DEPLOY_ARRAY_B
+    Description: Deploy solar array B
+    Parameters: None
+    Example: EPS_DEPLOY_ARRAY_B
+    Result:
+        - Solar array B deployed
+        - Array B begins generating power from sunlight (0-15W depending on sun angle)
+        - EVR log entry created
+    Use When: Initial deployment after launch, or after array stowage
+    Note: Arrays must be deployed to generate power
+
+EPS_CROSS_CHARGE_ENABLE
+    Description: Enable cross-charging between Battery A and Battery B
+    Parameters: None
+    Example: EPS_CROSS_CHARGE_ENABLE
+    Result:
+        - Cross-charging enabled
+        - Batteries will balance voltage/SOC automatically
+        - Higher voltage battery transfers charge to lower voltage battery
+        - EVR log entry created
+    Use When: One battery significantly lower than other, need balanced system
+    Note: Provides redundancy but reduces charging efficiency slightly
+
+EPS_CROSS_CHARGE_DISABLE
+    Description: Disable cross-charging between batteries
+    Parameters: None
+    Example: EPS_CROSS_CHARGE_DISABLE
+    Result:
+        - Cross-charging disabled
+        - Battery A charges only from Array A
+        - Battery B charges only from Array B
+        - EVR log entry created
+    Use When: One battery suspected faulty, want independent operation
+    Note: Default state - batteries operate independently for maximum reliability
+
+
+COMMUNICATIONS SYSTEM COMMANDS
+-------------------------------
+COMM_TX [timeout_seconds]
+    Description: Set communications to transmit mode
+    Parameters: 
+        timeout_seconds - Optional timeout to auto-return to RX (0 = no timeout)
+    Examples:
+        COMM_TX           (transmit indefinitely)
+        COMM_TX 300       (transmit for 5 minutes then return to RX)
+    Result:
+        - COMM mode set to TX
+        - Transmit power active at current setting (20/27/30 dBm)
+        - RX disabled (cannot receive during TX)
+    Use When: Need to transmit telemetry or command acknowledgments
+    Note: High power consumption - return to RX when not transmitting
+
+COMM_RX
+    Description: Set communications to receive mode
+    Parameters: None
+    Example: COMM_RX
+    Result:
+        - COMM mode set to RX
+        - Ready to receive uplink commands
+        - Lower power consumption than TX
+    Use When: Normal operations, listening for ground commands
+    Note: Default/nominal mode for COMM system
+
+COMM_TX_RX
+    Description: Set communications to full duplex mode (simultaneous TX/RX)
+    Parameters: None
+    Example: COMM_TX_RX
+    Result:
+        - COMM mode set to TX_RX (full duplex)
+        - Can transmit and receive simultaneously
+        - Highest power consumption mode
+        - No timeout - remains in full duplex until commanded otherwise
+    Use When: Critical operations requiring continuous uplink/downlink
+    Note: Exits safe mode if active
+
+COMM_STANDBY
+    Description: Set communications to standby (low power, minimal activity)
+    Parameters: None
+    Example: COMM_STANDBY
+    Result:
+        - COMM mode set to STANDBY
+        - Cannot TX or RX
+        - Lowest power consumption
+    Use When: Power conservation, thermal management
+    Note: Must return to RX/TX to resume communications
+
+COMM_POWER_30
+    Description: Set transmit power to high (30 dBm / 1W)
+    Parameters: None
+    Example: COMM_POWER_30
+    Result: TX power set to 30 dBm (maximum)
+    Use When: Long distance, poor link margin
+
+COMM_POWER_27
+    Description: Set transmit power to medium (27 dBm / 500mW)
+    Parameters: None
+    Example: COMM_POWER_27
+    Result: TX power set to 27 dBm (nominal)
+    Use When: Normal operations, good link margin
+
+COMM_POWER_20
+    Description: Set transmit power to low (20 dBm / 100mW)
+    Parameters: None
+    Example: COMM_POWER_20
+    Result: TX power set to 20 dBm (minimum)
+    Use When: Close proximity ground station, power conservation
+
+
+================================================================================
+PROPULSION COMMANDS - Heated Catalyst Monopropellant System
+================================================================================
+
+The propulsion system uses a two-stage power architecture:
+  1. STANDBY MODE (5V rail): Powers electronics only
+  2. SYSTEM ON (VBat): Powers catalyst heater and valve actuators
+
+The catalyst bed must be heated to 350°C for operation. Catalyst reaches ready
+state at 300°C (typically 2-3 minutes warm-up time). Monopropellant (N2H4)
+decomposes on contact with hot catalyst bed to produce thrust.
+
+PROP_STANDBY
+    Description: Enable propulsion standby mode (5V electronics power)
+    Parameters: None
+    Example: PROP_STANDBY
+    Result:
+        - 5V power enabled (~0.5W)
+        - Electronics and sensors powered
+        - Heater and valves remain unpowered
+    Use When: Preparing for propulsion operations
+    Note: Required before PROP_ON
+
+PROP_ON
+    Description: Enable full propulsion system (VBat power)
+    Parameters: None
+    Example: PROP_ON
+    Prerequisites: PROP_STANDBY must be active
+    Result:
+        - VBat power enabled
+        - Heater and valve actuators powered
+        - System ready for catalyst heating
+    Use When: Need thrust capability
+    Note: Does not automatically enable heater - use PROP_HEATER_ON
+
+PROP_OFF
+    Description: Disable propulsion system completely
+    Parameters: None
+    Example: PROP_OFF
+    Result:
+        - Disables VBat and 5V power
+        - Closes valve
+        - Turns off catalyst heater
+        - Catalyst begins cooling
+    Use When: End of propulsion operations, power conservation
+
+PROP_HEATER_ON
+    Description: Turn on catalyst bed heater
+    Parameters: None
+    Example: PROP_HEATER_ON
+    Prerequisites: PROP_ON (system enabled)
+    Result:
+        - Catalyst heater ON (25W draw)
+        - Begins heating to 350°C target
+        - Takes 2-3 minutes to reach ready state (300°C)
+    Use When: Preparing for thrust operations
+    Note: Monitor catalyst_temp and catalyst_ready telemetry
+
+PROP_HEATER_OFF
+    Description: Turn off catalyst bed heater
+    Parameters: None
+    Example: PROP_HEATER_OFF
+    Result:
+        - Catalyst heater OFF
+        - Catalyst begins cooling
+        - Catalyst goes NOT READY when temp < 300°C
+    Use When: After maneuvers complete, power conservation
+
+PROP_VALVE_OPEN
+    Description: Open propellant valve to produce thrust
+    Parameters: None
+    Example: PROP_VALVE_OPEN
+    Prerequisites:
+        - PROP_ON (system enabled)
+        - catalyst_ready = True (temp ≥ 300°C)
+    Result:
+        - Valve opens
+        - Monopropellant flows to catalyst bed
+        - Thrust produced (~1-5N typical)
+        - Propellant consumed (~0.001 kg/sec)
+    Use When: Performing maneuvers (desaturation, orbit adjust)
+    Warning: Valve automatically closes if catalyst not ready
+
+PROP_VALVE_CLOSE
+    Description: Close propellant valve to stop thrust
+    Parameters: None
+    Example: PROP_VALVE_CLOSE
+    Result:
+        - Valve closes
+        - Thrust stops
+        - Propellant consumption stops
+    Use When: End of maneuver
+
+Typical Propulsion Operation Sequence:
+    1. PROP_STANDBY           (Enable 5V electronics)
+    2. PROP_ON                (Enable VBat power)
+    3. PROP_HEATER_ON         (Start catalyst heating)
+    4. [Wait 2-3 min]         (Monitor catalyst_temp, wait for catalyst_ready)
+    5. PROP_VALVE_OPEN        (Produce thrust)
+    6. [Perform maneuver]
+    7. PROP_VALVE_CLOSE       (Stop thrust)
+    8. PROP_HEATER_OFF        (Optional: save power)
+    9. PROP_OFF               (Shutdown when done)
+
 
 ATT_RESET
     Description: Reset attitude control system
@@ -250,6 +474,190 @@ CMD7 or CMD 7
 CMD8 or CMD 8
     Quick Action: Reset watchdog timer
     Result: Watchdog timer reset logged
+
+
+================================================================================
+FAULT RECOVERY COMMANDS
+================================================================================
+
+When a subsystem fault is detected (faulted=True), that subsystem cannot be
+enabled or commanded until it is power cycled. Power cycle commands clear the
+fault flag and reset the subsystem to a safe default state.
+
+ADCS_POWER_CYCLE
+    Description: Power cycle ADCS subsystem to clear fault
+    Parameters: None
+    Example: ADCS_POWER_CYCLE
+    Result:
+        - Clears ADCS fault flag
+        - Disables ADCS
+        - Sets mode to DETUMBLE
+        - Resets reaction wheel speeds to 0 RPM
+    Use When: ADCS faulted, attitude control not responding
+
+EPS_POWER_CYCLE
+    Description: Power cycle EPS subsystem to clear fault
+    Parameters: None
+    Example: EPS_POWER_CYCLE
+    Result:
+        - Clears EPS fault flag
+        - Sets mode to NOMINAL
+    Use When: EPS faulted, power management not responding
+
+COMM_POWER_CYCLE
+    Description: Power cycle COMM subsystem to clear fault
+    Parameters: None
+    Example: COMM_POWER_CYCLE
+    Result:
+        - Clears COMM fault flag
+        - Sets mode to RX (receive)
+        - Resets temp to 25°C
+        - Resets TX power to 27 dBm
+    Use When: COMM faulted, communications not responding
+
+PROP_POWER_CYCLE
+    Description: Power cycle Propulsion subsystem to clear fault
+    Parameters: None
+    Example: PROP_POWER_CYCLE
+    Result:
+        - Clears PROP fault flag
+        - Disables standby and system power (5V and VBat)
+        - Closes propellant valve
+        - Turns off catalyst heater
+        - Resets all propulsion systems
+    Use When: PROP faulted, propulsion not responding
+
+TCS_POWER_CYCLE
+    Description: Power cycle Thermal Control subsystem to clear fault
+    Parameters: None
+    Example: TCS_POWER_CYCLE
+    Result:
+        - Clears TCS fault flag
+        - Turns off all heaters (AVI, EPS, PROP)
+    Use When: TCS faulted, thermal control not responding
+
+CDH_POWER_CYCLE
+    Description: Power cycle Command & Data Handling subsystem to clear fault
+    Parameters: None
+    Example: CDH_POWER_CYCLE
+    Result:
+        - Clears CDH fault flag
+        - Resets error count to 0
+    Use When: CDH faulted, data handling not responding
+
+TTC_POWER_CYCLE
+    Description: Power cycle TT&C subsystem to clear fault
+    Parameters: None
+    Example: TTC_POWER_CYCLE
+    Result:
+        - Clears TTC fault flag
+        - Resets link status to 'NO_LINK'
+    Use When: TTC faulted, telemetry tracking not responding
+
+STAR_TRACKER_POWER_CYCLE
+    Description: Power cycle Star Tracker to clear fault
+    Parameters: None
+    Example: STAR_TRACKER_POWER_CYCLE
+    Result:
+        - Clears Star Tracker fault flag
+        - Disables Star Tracker
+        - Resets star count to 0
+        - Clears attitude solution
+    Use When: Star Tracker faulted, precision attitude unavailable
+
+GPS_POWER_CYCLE
+    Description: Power cycle GPS receiver to clear fault
+    Parameters: None
+    Example: GPS_POWER_CYCLE
+    Result:
+        - Clears GPS fault flag
+        - Disables GPS
+        - Resets satellite count to 0
+        - Clears position/velocity solution
+    Use When: GPS faulted, navigation solution unavailable
+
+
+================================================================================
+NAVIGATION SYSTEM COMMANDS
+===============================================================================
+
+STAR_TRACKER_ON
+    Description: Enable Star Tracker for precision attitude determination
+    Parameters: None
+    Example: STAR_TRACKER_ON
+    Power: +2.5W
+    Result:
+        - Star Tracker powered on
+        - Begins tracking stars in field of view
+        - Provides high-accuracy attitude (0.5-15 arcsec depending on stability)
+        - Requires stable attitude for good solution
+    Use When: Need precision attitude determination (better than ADCS sensors)
+    Note: Works best when ADCS is enabled and spacecraft is stable
+
+STAR_TRACKER_OFF
+    Description: Disable Star Tracker
+    Parameters: None
+    Example: STAR_TRACKER_OFF
+    Result:
+        - Star Tracker powered off (-2.5W)
+        - Star tracking halted
+        - Attitude solution no longer updated
+    Use When: Power conservation, not needed for current operations
+
+GPS_ON
+    Description: Enable GPS receiver for position/velocity determination
+    Parameters: None
+    Example: GPS_ON
+    Power: +3.0W
+    Result:
+        - GPS receiver powered on
+        - Begins satellite acquisition (180 sec typical)
+        - Provides position accuracy 15-50m in LEO
+        - Provides velocity accuracy 0.1-0.5 m/s
+    Use When: Need precise orbit determination beyond TLE propagation
+    Note: LEO GPS requires 3-5 minutes for first fix
+
+GPS_OFF
+    Description: Disable GPS receiver
+    Parameters: None
+    Example: GPS_OFF
+    Result:
+        - GPS receiver powered off (-3.0W)
+        - Satellite tracking halted
+        - Position/velocity solution no longer updated
+    Use When: Power conservation, orbit determination not critical
+
+
+================================================================================
+FAULT INJECTION COMMANDS (TESTING ONLY)
+================================================================================
+
+These commands control the fault injection system for training purposes.
+When enabled, a random subsystem fault will be injected between 2-5 minutes
+after mission start. Only one fault per test run.
+
+FAULT_INJECTION_ENABLE
+    Description: Enable fault injection for fault response training
+    Parameters: None
+    Example: FAULT_INJECTION_ENABLE
+    Result:
+        - Fault injection system armed
+        - Random fault scheduled between T+2min and T+5min
+        - Random subsystem will be faulted
+        - EVR log shows scheduled time
+    Use When: Beginning fault response training scenario
+    Warning: Do NOT use during nominal operations training
+
+FAULT_INJECTION_DISABLE
+    Description: Disable fault injection system
+    Parameters: None
+    Example: FAULT_INJECTION_DISABLE
+    Result:
+        - Fault injection system disarmed
+        - No fault will be injected (if not already injected)
+        - EVR log confirms disablement
+    Use When: Switching from fault response to nominal training
+    Note: Cannot prevent fault if already scheduled/injected
 
 
 ================================================================================
@@ -387,6 +795,14 @@ NOTES
    - Roll: rotation about X (forward) axis
    - Pitch: rotation about Y (starboard) axis  
    - Yaw: rotation about Z (nadir) axis
+6. FAULTED SUBSYSTEMS: When a subsystem shows 'faulted: True', it cannot be
+   enabled or commanded until you send the appropriate POWER_CYCLE command.
+   Example: If ADCS is faulted, commands like ADCS_NADIR will be rejected
+   with "ADCS mode rejected - ADCS faulted (power cycle required)"
+7. SAFE MODE ADCS: When entering safe mode, ADCS will remain enabled in
+   DETUMBLE mode for attitude stabilization, UNLESS the ADCS itself is
+   faulted. This ensures the spacecraft maintains attitude control during
+   emergencies whenever possible.
 
 ================================================================================
 END OF COMMAND REFERENCE

@@ -40,16 +40,18 @@ class EIDGUI:
         
         # Define which telemetry to show for each subsystem
         self.subsystem_telemetry = {
-            'orbit': ['altitude', 'velocity', 'latitude', 'longitude', 'eclipse', 'sun_angle'],
-            'eps': ['mode', 'battery_voltage', 'battery_soc', 'battery_current', 'battery_temp', 
-                    'solar_power', 'bus_voltage', 'bus_current'],
-            'adcs': ['mode', 'enabled', 'roll', 'pitch', 'yaw', 'roll_rate', 'pitch_rate', 'yaw_rate', 'rws_rpm_x', 'rws_rpm_y', 'rws_rpm_z'],
-            'comm': ['mode', 'tx_power', 'frequency', 'data_rate', 'temp', 'packets_tx', 'packets_rx', 'tx_time_remaining'],
-            'tcs': ['temp_avi', 'temp_eps', 'temp_external', 'heater_avi_on', 'heater_eps_on', 'radiator_coating'],
-            'prop': ['system_enabled', 'propellant_mass', 'tank_pressure', 'tank_temp', 'valve_open', 'total_delta_v'],
+            'orbit': ['altitude', 'velocity', 'latitude', 'longitude', 'eclipse', 'eclipse_fraction', 'beta_angle', 'sun_angle'],
+            'eps': ['mode', 'faulted', 'solar_array_a_deployed', 'solar_array_b_deployed', 'battery_a_voltage', 'battery_a_soc', 
+                    'battery_b_voltage', 'battery_b_soc', 'cross_charging_enabled', 'bus_voltage', 'bus_current'],
+            'adcs': ['mode', 'enabled', 'faulted', 'voltage', 'current', 'roll', 'pitch', 'yaw', 'roll_rate', 'pitch_rate', 'yaw_rate', 'rws_rpm_x', 'rws_rpm_y', 'rws_rpm_z'],
+            'comm': ['mode', 'faulted', 'voltage', 'current', 'tx_power', 'frequency', 'data_rate', 'temp', 'packets_tx', 'packets_rx', 'tx_time_remaining'],
+            'tcs': ['faulted', 'voltage', 'current', 'temp_avi', 'temp_eps', 'heater_avi_on', 'heater_eps_on', 'heater_prop_on', 'radiator_deployed'],
+            'prop': ['standby_mode', 'system_enabled', 'faulted', 'catalyst_heater_on', 'catalyst_temp', 'catalyst_ready', 'voltage_5v', 'current_5v', 'voltage_vbat', 'current_vbat', 'propellant_mass', 'propellant_type', 'tank_pressure', 'tank_temp', 'valve_open', 'total_delta_v'],
             'avi': ['cpu_load', 'cpu_temp', 'memory_usage', 'uptime', 'boot_count', 'watchdog_ok'],
-            'cdh': ['cmd_count', 'tlm_count', 'error_count', 'storage_used', 'storage_total'],
-            'ttc': ['link_status', 'signal_strength', 'uplink_rate', 'downlink_rate', 'pass_elevation', 'doppler_shift']
+            'cdh': ['faulted', 'voltage', 'current', 'cmd_count', 'tlm_count', 'error_count', 'storage_used', 'storage_total'],
+            'ttc': ['faulted', 'voltage', 'current', 'link_status', 'signal_strength', 'uplink_rate', 'downlink_rate', 'pass_elevation', 'doppler_shift'],
+            'star_tracker': ['enabled', 'faulted', 'voltage', 'current', 'init_time_remaining', 'num_stars_tracked', 'attitude_valid', 'attitude_accuracy', 'roll', 'pitch', 'yaw', 'sensor_temp'],
+            'gps': ['enabled', 'faulted', 'voltage', 'current', 'num_satellites', 'position_valid', 'position_accuracy', 'velocity_accuracy', 'receiver_temp']
         }
         
         # Map subsystems to their relevant commands
@@ -57,13 +59,16 @@ class EIDGUI:
             'adcs': {
                 'system': 'Attitude Determination & Control',
                 'commands': [
-                    (" Nadir Pointing", "ADCS_NADIR"),
+                    ("🌍 Nadir Pointing", "ADCS_NADIR"),
                     ("☀️ Sun Pointing", "ADCS_SUN_POINT"),
                     ("📍 Inertial Hold", "ADCS_INERTIAL"),
                     ("🔄 Detumble Mode", "ADCS_DETUMBLE"),
+                    ("🎯 Go To Attitude (R/P/Y)", "ADCS_GO_TO"),
                     ("🎯 Reset Attitude", "ADCS_RESET"),
+                    ("💫 Desaturate Wheels", "ADCS_DESAT"),
                     ("⚡ ADCS On", "ADCS_ON"),
                     ("⏸️ ADCS Off", "ADCS_OFF"),
+                    ("🔄 Power Cycle", "ADCS_POWER_CYCLE"),
                 ]
             },
             'eps': {
@@ -72,30 +77,42 @@ class EIDGUI:
                     ("📊 Nominal Mode", "EPS_MODE_NOMINAL"),
                     ("🔋 Low Power Mode", "EPS_MODE_LOW_POWER"),
                     ("🔬 Science Mode", "EPS_MODE_SCIENCE"),
-                    ("�️ Safe Mode", "EPS_MODE_SAFE"),
+                    ("🛡️ Safe Mode", "EPS_MODE_SAFE"),
                     ("🔄 EPS Reset", "EPS_RESET"),
+                    ("🌞 Deploy Array A", "EPS_DEPLOY_ARRAY_A"),
+                    ("🌛 Undeploy Array A", "EPS_UNDEPLOY_ARRAY_A"),
+                    ("🌞 Deploy Array B", "EPS_DEPLOY_ARRAY_B"),
+                    ("🌛 Undeploy Array B", "EPS_UNDEPLOY_ARRAY_B"),
+                    ("🔗 Cross-Charge Enable", "EPS_CROSS_CHARGE_ENABLE"),
+                    ("❌ Cross-Charge Disable", "EPS_CROSS_CHARGE_DISABLE"),
+                    ("🔄 Power Cycle", "EPS_POWER_CYCLE"),
                 ]
             },
             'comm': {
                 'system': 'Communications',
                 'commands': [
                     ("📡 TX Mode", "COMM_TX"),
-                    ("� RX Mode", "COMM_RX"),
+                    ("📨 RX Mode", "COMM_RX"),
+                    ("🔄 TX/RX Full Duplex", "COMM_TX_RX"),
                     ("⏸️ Standby", "COMM_STANDBY"),
                     ("⚡ High Power (30dBm)", "COMM_POWER_30"),
-                    ("� Med Power (27dBm)", "COMM_POWER_27"),
+                    ("📶 Med Power (27dBm)", "COMM_POWER_27"),
                     ("💤 Low Power (20dBm)", "COMM_POWER_20"),
-                    ("� COMM Reset", "COMM_RESET"),
+                    ("🔧 COMM Reset", "COMM_RESET"),
+                    ("🔄 Power Cycle", "COMM_POWER_CYCLE"),
                 ]
             },
             'prop': {
-                'system': 'Propulsion',
+                'system': 'Propulsion - Heated Catalyst Monoprop',
                 'commands': [
-                    ("⚡ Propulsion On", "PROP_ON"),
-                    ("⏹️ Propulsion Off", "PROP_OFF"),
-                    ("⏸️ Standby", "PROP_STANDBY"),
+                    ("⚡ Standby (5V)", "PROP_STANDBY"),
+                    ("🔋 System On (VBat)", "PROP_ON"),
+                    ("⏹️ System Off", "PROP_OFF"),
+                    ("🔥 Catalyst Heater On", "PROP_HEATER_ON"),
+                    ("❄️ Catalyst Heater Off", "PROP_HEATER_OFF"),
                     ("🔓 Open Valve", "PROP_VALVE_OPEN"),
                     ("🔒 Close Valve", "PROP_VALVE_CLOSE"),
+                    ("🔄 Power Cycle", "PROP_POWER_CYCLE"),
                 ]
             },
             'tcs': {
@@ -107,6 +124,9 @@ class EIDGUI:
                     ("❄️ EPS Heater Off", "TCS_HEATER_EPS_OFF"),
                     ("🔥 PROP Heater On", "TCS_HEATER_PROP_ON"),
                     ("❄️ PROP Heater Off", "TCS_HEATER_PROP_OFF"),
+                    ("📡 Deploy Radiator", "TCS_DEPLOY_RADIATOR"),
+                    ("📦 Undeploy Radiator", "TCS_UNDEPLOY_RADIATOR"),
+                    ("🔄 Power Cycle", "TCS_POWER_CYCLE"),
                 ]
             },
             'avi': {
@@ -120,18 +140,43 @@ class EIDGUI:
                 'system': 'Command & Data Handling',
                 'commands': [
                     ("� Status Check", "CDH_STATUS"),
+                    ("🔄 Power Cycle", "CDH_POWER_CYCLE"),
                 ]
             },
             'ttc': {
                 'system': 'TT&C Ground Interface',
                 'commands': [
-                    ("� Link Check", "TTC_STATUS"),
+                    ("📊 Link Check", "TTC_STATUS"),
+                    ("🔄 Power Cycle", "TTC_POWER_CYCLE"),
+                ]
+            },
+            'star_tracker': {
+                'system': 'Star Tracker Navigation',
+                'commands': [
+                    ("⭐ Enable Tracker", "STAR_TRACKER_ON"),
+                    ("⏸️ Disable Tracker", "STAR_TRACKER_OFF"),
+                    ("🔄 Power Cycle", "STAR_TRACKER_POWER_CYCLE"),
+                ]
+            },
+            'gps': {
+                'system': 'GPS Navigation',
+                'commands': [
+                    ("📡 Enable GPS", "GPS_ON"),
+                    ("⏸️ Disable GPS", "GPS_OFF"),
+                    ("🔄 Power Cycle", "GPS_POWER_CYCLE"),
                 ]
             },
             'orbit': {
                 'system': 'Orbital Parameters',
                 'commands': [
-                    ("� Orbit Status", "ORBIT_STATUS"),
+                    ("📍 Orbit Status", "ORBIT_STATUS"),
+                ]
+            },
+            'system': {
+                'system': 'System Controls',
+                'commands': [
+                    ("⚠️ Enable Fault Injection", "FAULT_INJECTION_ENABLE"),
+                    ("✅ Disable Fault Injection", "FAULT_INJECTION_DISABLE"),
                 ]
             }
         }
@@ -183,11 +228,13 @@ class EIDGUI:
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         
         # Create subsystem sections
-        subsystem_order = ['orbit', 'eps', 'adcs', 'comm', 'tcs', 'prop', 'avi', 'cdh', 'ttc']
+        subsystem_order = ['orbit', 'eps', 'adcs', 'star_tracker', 'gps', 'comm', 'tcs', 'prop', 'avi', 'cdh', 'ttc']
         subsystem_names = {
             'orbit': '🛰️ ORBIT',
             'eps': '⚡ EPS - Electrical Power',
             'adcs': '🎯 ADCS - Attitude Control',
+            'star_tracker': '⭐ STAR TRACKER - Navigation',
+            'gps': '📡 GPS - Navigation',
             'comm': '📡 COMM - Communications',
             'tcs': '🌡️ TCS - Thermal Control',
             'prop': '🚀 PROP - Propulsion',
@@ -217,13 +264,13 @@ class EIDGUI:
             tlm_grid = tk.Frame(scrollable_frame, bg=self.colors['bg_main'])
             tlm_grid.pack(fill=tk.X, padx=5, pady=(0, 5))
             
-            # Create telemetry displays (4 per row)
+            # Create telemetry displays (7 per row)
             telemetry_keys = self.subsystem_telemetry[subsystem]
             self.subsystem_labels[subsystem] = []
             
             for idx, tlm_key in enumerate(telemetry_keys):
-                row = idx // 4
-                col = idx % 4
+                row = idx // 7
+                col = idx % 7
                 
                 # Create display
                 display_frame = tk.Frame(tlm_grid, bg=self.colors['bg_panel'], relief=tk.FLAT, bd=0)
@@ -295,14 +342,14 @@ class EIDGUI:
         cmd_grid.pack(padx=5, pady=5)
         
         commands = [
-            ("🌍 Nadir\nPoint", "ADCS_NADIR", self.colors['button_nominal']),
-            ("☀️ Sun\nPoint", "ADCS_SUN_POINT", self.colors['button_nominal']),
-            ("🔬 Science\nMode", "EPS_MODE_SCIENCE", self.colors['button_nominal']),
-            ("🔋 Low Pwr\nMode", "EPS_MODE_LOW_POWER", self.colors['button_nominal']),
-            ("📊 Nominal\nMode", "EPS_MODE_NOMINAL", self.colors['button_nominal']),
             ("⚡ ADCS\nOn", "ADCS_ON", self.colors['button_nominal']),
-            ("🛡️ Safe\nMode", "SAFE_MODE", self.colors['button_response']),
-            ("🔄 System\nReset", "SYS_RESET", self.colors['button_response'])
+            ("🔌 PROP\n5V On", "PROP_STANDBY", self.colors['button_nominal']),
+            ("☀️ Sun\nPoint", "ADCS_SUN_POINT", self.colors['button_nominal']),
+            ("🌍 Nadir\nPoint", "ADCS_NADIR", self.colors['button_nominal']),
+            ("🎯 Go To\nAttitude", "ADCS_GO_TO", self.colors['button_nominal']),
+            ("📡 RX\nMode", "COMM_RX", self.colors['button_nominal']),
+            ("📡 TX/RX\nMode", "COMM_TX_RX", self.colors['button_nominal']),
+            ("🛡️ Safe\nMode", "SAFE_MODE", self.colors['button_response'])
         ]
         
         for i, (label, cmd, color) in enumerate(commands):
@@ -323,6 +370,11 @@ class EIDGUI:
     def execute_command(self, command):
         """Execute a command with error handling"""
         try:
+            # Special handling for ADCS_GO_TO - prompt for roll, pitch, yaw
+            if command == "ADCS_GO_TO":
+                self.open_adcs_goto_dialog(self.root)
+                return
+            
             spacecraft.send_command(command)
         
             # Log command to experiment manager if active
@@ -387,9 +439,41 @@ class EIDGUI:
                              fg=self.colors['fg_secondary'])
         info_label.pack(pady=5)
         
-        # Commands frame
-        cmd_frame = tk.Frame(cmd_window, bg=self.colors['bg_main'])
-        cmd_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+        # Create scrollable container
+        container = tk.Frame(cmd_window, bg=self.colors['bg_main'])
+        container.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+        
+        # Create canvas with scrollbar
+        canvas = tk.Canvas(container, bg=self.colors['bg_main'], highlightthickness=0)
+        scrollbar = tk.Scrollbar(container, orient="vertical", command=canvas.yview)
+        cmd_frame = tk.Frame(canvas, bg=self.colors['bg_main'])
+        
+        cmd_frame.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
+        
+        canvas.create_window((0, 0), window=cmd_frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+        
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+        
+        # Enable mousewheel scrolling
+        def _on_mousewheel(event):
+            try:
+                canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+            except:
+                pass  # Canvas no longer exists
+        
+        canvas.bind_all("<MouseWheel>", _on_mousewheel)
+        
+        # Unbind mousewheel when window closes
+        def _on_close():
+            canvas.unbind_all("<MouseWheel>")
+            cmd_window.destroy()
+        
+        cmd_window.protocol("WM_DELETE_WINDOW", _on_close)
         
         # Create buttons for each command
         for label, cmd in commands:
@@ -423,6 +507,11 @@ class EIDGUI:
     def execute_subsystem_command(self, command, window):
         """Execute a subsystem command"""
         try:
+            # Special handling for ADCS_GO_TO - prompt for roll, pitch, yaw
+            if command == "ADCS_GO_TO":
+                self.open_adcs_goto_dialog(window)
+                return
+            
             spacecraft.send_command(command)
         
             # Log command to experiment manager if active
@@ -440,6 +529,110 @@ class EIDGUI:
             print(f"Error executing command: {e}")
             window.destroy()
     
+    def open_adcs_goto_dialog(self, parent_window):
+        """Open dialog to input roll, pitch, yaw for ADCS_GO_TO command"""
+        dialog = tk.Toplevel(self.root)
+        dialog.title("🎯 Go To Attitude")
+        dialog.geometry("350x280")
+        dialog.configure(bg=self.colors['bg_main'])
+        dialog.transient(parent_window)
+        dialog.grab_set()
+        
+        # Title
+        title_frame = tk.Frame(dialog, bg=self.colors['bg_panel'], pady=8)
+        title_frame.pack(fill=tk.X, padx=10, pady=(10, 5))
+        tk.Label(title_frame, text="🎯 Enter Target Attitude",
+                font=self.font_title,
+                bg=self.colors['bg_panel'],
+                fg=self.colors['fg_main']).pack()
+        
+        # Input frame
+        input_frame = tk.Frame(dialog, bg=self.colors['bg_main'])
+        input_frame.pack(padx=20, pady=5, fill=tk.X)
+        
+        # Roll input
+        tk.Label(input_frame, text="Roll (°):", font=('Segoe UI', 10),
+                bg=self.colors['bg_main'], fg=self.colors['fg_main']).grid(row=0, column=0, sticky='e', padx=5, pady=5)
+        roll_entry = tk.Entry(input_frame, font=('Segoe UI', 10), width=15)
+        roll_entry.grid(row=0, column=1, padx=5, pady=5)
+        roll_entry.insert(0, "0")
+        
+        # Pitch input
+        tk.Label(input_frame, text="Pitch (°):", font=('Segoe UI', 10),
+                bg=self.colors['bg_main'], fg=self.colors['fg_main']).grid(row=1, column=0, sticky='e', padx=5, pady=5)
+        pitch_entry = tk.Entry(input_frame, font=('Segoe UI', 10), width=15)
+        pitch_entry.grid(row=1, column=1, padx=5, pady=5)
+        pitch_entry.insert(0, "0")
+        
+        # Yaw input
+        tk.Label(input_frame, text="Yaw (°):", font=('Segoe UI', 10),
+                bg=self.colors['bg_main'], fg=self.colors['fg_main']).grid(row=2, column=0, sticky='e', padx=5, pady=5)
+        yaw_entry = tk.Entry(input_frame, font=('Segoe UI', 10), width=15)
+        yaw_entry.grid(row=2, column=1, padx=5, pady=5)
+        yaw_entry.insert(0, "0")
+        
+        # Error label (above buttons)
+        error_label = tk.Label(dialog, text="", font=('Segoe UI', 9),
+                              bg=self.colors['bg_main'], fg=self.colors['bg_tlm_warning'])
+        error_label.pack(pady=(10, 5))
+        
+        # Button frame
+        button_frame = tk.Frame(dialog, bg=self.colors['bg_main'])
+        button_frame.pack(pady=(0, 15))
+        
+        def execute_goto():
+            try:
+                roll = float(roll_entry.get())
+                pitch = float(pitch_entry.get())
+                yaw = float(yaw_entry.get())
+                
+                command = f"ADCS_GO_TO {roll} {pitch} {yaw}"
+                spacecraft.send_command(command)
+                
+                # Log command to experiment manager if active
+                try:
+                    from experiment_manager import experiment_manager
+                    if experiment_manager and experiment_manager.is_running:
+                        experiment_manager.log_command(command)
+                        if not experiment_manager.anomaly_resolved_time:
+                            experiment_manager.mark_anomaly_resolved()
+                except:
+                    pass
+                
+                dialog.destroy()
+            except ValueError:
+                error_label.config(text="⚠️ Invalid input - enter numbers only")
+        
+        def cancel():
+            dialog.destroy()
+        
+        # Execute button
+        exec_btn = tk.Button(button_frame, text="Execute",
+                            command=execute_goto,
+                            bg=self.colors['button_nominal'],
+                            fg='white',
+                            font=self.font_button,
+                            width=12,
+                            relief=tk.RAISED, bd=2,
+                            activebackground=self.colors['accent'],
+                            cursor='hand2')
+        exec_btn.pack(side=tk.LEFT, padx=5)
+        
+        # Cancel button
+        cancel_btn = tk.Button(button_frame, text="Cancel",
+                              command=cancel,
+                              bg=self.colors['fg_secondary'],
+                              fg='white',
+                              font=self.font_button,
+                              width=12,
+                              relief=tk.RAISED, bd=2,
+                              cursor='hand2')
+        cancel_btn.pack(side=tk.LEFT, padx=5)
+        
+        # Focus on roll entry
+        roll_entry.focus_set()
+        roll_entry.select_range(0, tk.END)
+    
     def open_anomaly_window(self):
         """Open generic anomaly response command window (fallback)"""
         anomaly_window = tk.Toplevel(self.root)
@@ -456,9 +649,41 @@ class EIDGUI:
                 bg=self.colors['bg_panel'],
                 fg=self.colors['fg_main']).pack()
         
-        # Commands frame
-        cmd_frame = tk.Frame(anomaly_window, bg=self.colors['bg_main'])
-        cmd_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+        # Create scrollable container
+        container = tk.Frame(anomaly_window, bg=self.colors['bg_main'])
+        container.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+        
+        # Create canvas with scrollbar
+        canvas = tk.Canvas(container, bg=self.colors['bg_main'], highlightthickness=0)
+        scrollbar = tk.Scrollbar(container, orient="vertical", command=canvas.yview)
+        cmd_frame = tk.Frame(canvas, bg=self.colors['bg_main'])
+        
+        cmd_frame.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
+        
+        canvas.create_window((0, 0), window=cmd_frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+        
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+        
+        # Enable mousewheel scrolling
+        def _on_mousewheel(event):
+            try:
+                canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+            except:
+                pass  # Canvas no longer exists
+        
+        canvas.bind_all("<MouseWheel>", _on_mousewheel)
+        
+        # Unbind mousewheel when window closes
+        def _on_close():
+            canvas.unbind_all("<MouseWheel>")
+            anomaly_window.destroy()
+        
+        anomaly_window.protocol("WM_DELETE_WINDOW", _on_close)
         
         # Generic anomaly response commands
         commands = [
@@ -518,20 +743,29 @@ class EIDGUI:
                     value = subsystem_data[tlm_key]
                     display_name = tlm_key.replace('_', ' ').title()
                     
-                    # Determine color based on value (traffic light system)
-                    color = self.get_tlm_color(subsystem, tlm_key, value)
-                    
-                    # Format value
-                    if isinstance(value, float):
-                        value_str = f"{value:.2f}"
-                    elif isinstance(value, int):
-                        value_str = str(value)
+                    # Check for stale telemetry indicator (value ends with ' S')
+                    if isinstance(value, str) and value.endswith(' S'):
+                        # Stale telemetry - show last known value with 'S' indicator
+                        base_value = value[:-2]  # Remove ' S' suffix
+                        label.config(text=f"{display_name}\n{base_value} S", bg='gray', fg='orange')
+                    elif value == 'S':
+                        # Legacy stale format (for backward compatibility)
+                        label.config(text=f"{display_name}\nS", bg='gray', fg='orange')
                     else:
-                        value_str = str(value)
-                    
-                    label.config(text=f"{display_name}\n{value_str}", bg=color)
+                        # Determine color based on value (traffic light system)
+                        color = self.get_tlm_color(subsystem, tlm_key, value, subsystem_data)
+                        
+                        # Format value
+                        if isinstance(value, float):
+                            value_str = f"{value:.2f}"
+                        elif isinstance(value, int):
+                            value_str = str(value)
+                        else:
+                            value_str = str(value)
+                        
+                        label.config(text=f"{display_name}\n{value_str}", bg=color, fg='white')
                 else:
-                    label.config(text=f"{tlm_key}\nN/A", bg='gray')
+                    label.config(text=f"{tlm_key}\nN/A", bg='gray', fg='white')
                 
         # Update EVR log
         evr_log = spacecraft.get_evr_log()
@@ -548,9 +782,20 @@ class EIDGUI:
         # Schedule next update (1 Hz)
         self.root.after(1000, self.update_data)
         
-    def get_tlm_color(self, subsystem, key, value):
+    def get_tlm_color(self, subsystem, key, value, subsystem_data=None):
         """Get traffic light color based on telemetry value"""
         # Green = nominal, Yellow = caution, Red = warning
+        
+        # Special handling for faulted field
+        if key == 'faulted':
+            if value is True or value == 'True' or value == True:
+                return self.colors['bg_tlm_warning']  # Red when faulted
+            else:
+                return self.colors['bg_tlm_good']  # Green when not faulted
+        
+        # Boolean values (except 'faulted' handled above) are always nominal
+        if isinstance(value, bool):
+            return self.colors['bg_tlm_good']
         
         # Only apply thresholds to numeric values
         if not isinstance(value, (int, float)):
@@ -558,26 +803,35 @@ class EIDGUI:
         
         # EPS (Electrical Power System)
         if subsystem == 'eps':
-            if key == 'battery_voltage':
-                if value < 10.0:
+            if key == 'battery_voltage' or key == 'battery_a_voltage' or key == 'battery_b_voltage':
+                if value < 10.2:
                     return self.colors['bg_tlm_warning']
-                elif value < 10.8:
+                elif value < 10.5:
                     return self.colors['bg_tlm_caution']
                 else:
                     return self.colors['bg_tlm_good']
                     
-            elif key == 'battery_soc':
-                if value < 20:
+            elif key == 'battery_soc' or key == 'battery_a_soc' or key == 'battery_b_soc':
+                if value < 15:
                     return self.colors['bg_tlm_warning']
-                elif value < 40:
+                elif value < 20:
                     return self.colors['bg_tlm_caution']
                 else:
                     return self.colors['bg_tlm_good']
                     
-            elif key == 'battery_temp':
-                if value > 45 or value < -10:
+            elif key == 'battery_temp' or key == 'battery_a_temp' or key == 'battery_b_temp':
+                if value > 50 or value < -15:
                     return self.colors['bg_tlm_warning']
-                elif value > 40 or value < 0:
+                elif value > 45 or value < -10:
+                    return self.colors['bg_tlm_caution']
+                else:
+                    return self.colors['bg_tlm_good']
+                    
+            elif key == 'battery_current' or key == 'battery_a_current' or key == 'battery_b_current':
+                abs_val = abs(value)
+                if abs_val > 3.0:
+                    return self.colors['bg_tlm_warning']
+                elif abs_val > 2.7:
                     return self.colors['bg_tlm_caution']
                 else:
                     return self.colors['bg_tlm_good']
@@ -585,10 +839,48 @@ class EIDGUI:
         # ADCS (Attitude Determination & Control)
         elif subsystem == 'adcs':
             if key in ['roll', 'pitch', 'yaw']:
-                abs_val = abs(value)
-                if abs_val > 10:
+                # Mode-aware color checking for attitudes
+                # Get current ADCS mode and determine target attitudes
+                mode = subsystem_data.get('mode', 'DETUMBLE') if subsystem_data else 'DETUMBLE'
+                
+                # Determine target attitude based on current mode
+                if mode == 'SUN_POINT':
+                    # Sun pointing: -X axis (solar panels) points at sun
+                    target_roll = 180.0
+                    target_pitch = 0.0
+                    target_yaw = 0.0
+                elif mode == 'NADIR':
+                    # Nadir pointing: +X axis points at Earth
+                    target_roll = 0.0
+                    target_pitch = -90.0
+                    target_yaw = 0.0
+                elif mode == 'FINE_HOLD':
+                    # Fine hold: use commanded target attitudes
+                    target_roll = subsystem_data.get('target_roll', 0.0) if subsystem_data else 0.0
+                    target_pitch = subsystem_data.get('target_pitch', 0.0) if subsystem_data else 0.0
+                    target_yaw = subsystem_data.get('target_yaw', 0.0) if subsystem_data else 0.0
+                else:
+                    # DETUMBLE, INERTIAL, or other modes: target is 0,0,0
+                    target_roll = 0.0
+                    target_pitch = 0.0
+                    target_yaw = 0.0
+                
+                # Select appropriate target for this axis
+                if key == 'roll':
+                    target = target_roll
+                elif key == 'pitch':
+                    target = target_pitch
+                else:  # yaw
+                    target = target_yaw
+                
+                # Calculate error with angle wrapping (-180 to +180)
+                error = (value - target + 180) % 360 - 180
+                abs_error = abs(error)
+                
+                # Apply thresholds to error magnitude
+                if abs_error > 10:
                     return self.colors['bg_tlm_warning']
-                elif abs_val > 5:
+                elif abs_error > 5:
                     return self.colors['bg_tlm_caution']
                 else:
                     return self.colors['bg_tlm_good']
@@ -602,72 +894,81 @@ class EIDGUI:
                 else:
                     return self.colors['bg_tlm_good']
                     
-        # TCS (Thermal Control)
-        elif subsystem == 'tcs':
-            if key.startswith('temp_panel'):
-                # External panel temps are cold
-                if value > -10 or value < -100:
+            elif key in ['rws_rpm_x', 'rws_rpm_y', 'rws_rpm_z']:
+                abs_val = abs(value)
+                if abs_val > 5500:
                     return self.colors['bg_tlm_warning']
-                elif value > -30 or value < -95:
+                elif abs_val > 4500:
                     return self.colors['bg_tlm_caution']
                 else:
                     return self.colors['bg_tlm_good']
-            else:
-                # Internal component temps
-                if value > 50 or value < 0:
+                    
+        # TCS (Thermal Control)
+        elif subsystem == 'tcs':
+            if key == 'temp_avi':
+                if value > 55 or value < -5:
                     return self.colors['bg_tlm_warning']
-                elif value > 45 or value < 5:
+                elif value > 50 or value < 0:
+                    return self.colors['bg_tlm_caution']
+                else:
+                    return self.colors['bg_tlm_good']
+                    
+            elif key == 'temp_eps':
+                if value > 50 or value < -15:
+                    return self.colors['bg_tlm_warning']
+                elif value > 45 or value < -10:
                     return self.colors['bg_tlm_caution']
                 else:
                     return self.colors['bg_tlm_good']
                     
         # COMM (Communications)
         elif subsystem == 'comm':
-            if key == 'rssi':
-                if value < -100:
+            if key == 'temp':
+                if value > 65:
                     return self.colors['bg_tlm_warning']
-                elif value < -95:
-                    return self.colors['bg_tlm_caution']
-                else:
-                    return self.colors['bg_tlm_good']
-                    
-            elif key == 'pa_temp':
-                if value > 60:
-                    return self.colors['bg_tlm_warning']
-                elif value > 55:
-                    return self.colors['bg_tlm_caution']
-                else:
-                    return self.colors['bg_tlm_good']
-                    
-            elif key == 'link_margin':
-                if value < 5:
-                    return self.colors['bg_tlm_warning']
-                elif value < 10:
+                elif value > 60:
                     return self.colors['bg_tlm_caution']
                 else:
                     return self.colors['bg_tlm_good']
                     
         # PROP (Propulsion)
         elif subsystem == 'prop':
-            if key == 'fuel_mass':
-                if value < 0.020:
+            if key == 'propellant_mass':
+                if value < 0.01:
                     return self.colors['bg_tlm_warning']
-                elif value < 0.050:
+                elif value < 0.05:
                     return self.colors['bg_tlm_caution']
                 else:
                     return self.colors['bg_tlm_good']
                     
-            elif key == 'fuel_pressure':
-                if value < 100 or value > 250:
+            elif key == 'tank_pressure':
+                if value < 50 or value > 250:
                     return self.colors['bg_tlm_warning']
-                elif value < 150 or value > 220:
+                elif value < 100 or value > 230:
+                    return self.colors['bg_tlm_caution']
+                else:
+                    return self.colors['bg_tlm_good']
+                    
+            elif key == 'tank_temp':
+                if value < -20 or value > 60:
+                    return self.colors['bg_tlm_warning']
+                elif value < -10 or value > 50:
+                    return self.colors['bg_tlm_caution']
+                else:
+                    return self.colors['bg_tlm_good']
+                    
+            elif key == 'catalyst_temp':
+                # Catalyst optimal temperature is 300-350°C
+                if value < 250 or value > 400:
+                    return self.colors['bg_tlm_warning']
+                elif value < 300 or value > 350:
                     return self.colors['bg_tlm_caution']
                 else:
                     return self.colors['bg_tlm_good']
                     
         # AVI (Avionics)
         elif subsystem == 'avi':
-            if key in ['cpu_usage', 'memory_usage', 'storage_used']:
+            if key in ['cpu_load', 'memory_usage']:
                 if value > 95:
                     return self.colors['bg_tlm_warning']
                 elif value > 85:
@@ -676,9 +977,9 @@ class EIDGUI:
                     return self.colors['bg_tlm_good']
                     
             elif key == 'cpu_temp':
-                if value > 60:
+                if value > 75:
                     return self.colors['bg_tlm_warning']
-                elif value > 50:
+                elif value > 65:
                     return self.colors['bg_tlm_caution']
                 else:
                     return self.colors['bg_tlm_good']
@@ -688,6 +989,75 @@ class EIDGUI:
             if key == 'altitude':
                 # 520km nominal
                 if value < 510 or value > 530:
+                    return self.colors['bg_tlm_caution']
+                else:
+                    return self.colors['bg_tlm_good']
+                    
+        # CDH (Command & Data Handling)
+        elif subsystem == 'cdh':
+            if key == 'storage_used':
+                # Note: storage_used is an absolute value, need to calculate percentage
+                # This is a simplified check - the actual system calculates percentage
+                # For now, check if the value itself seems high (assuming max is around 100)
+                if value > 95:
+                    return self.colors['bg_tlm_warning']
+                elif value > 85:
+                    return self.colors['bg_tlm_caution']
+                else:
+                    return self.colors['bg_tlm_good']
+                    
+        # TTC (Tracking, Telemetry & Command)
+        elif subsystem == 'ttc':
+            if key == 'signal_strength':
+                if value < -100:
+                    return self.colors['bg_tlm_warning']
+                elif value < -95:
+                    return self.colors['bg_tlm_caution']
+                else:
+                    return self.colors['bg_tlm_good']
+                    
+        # Star Tracker (Precision Attitude Sensor)
+        elif subsystem == 'star_tracker':
+            if key == 'init_time_remaining':
+                # Green when initialized (0), yellow when initializing
+                if value > 0:
+                    return self.colors['bg_tlm_caution']
+                else:
+                    return self.colors['bg_tlm_good']
+                    
+            elif key == 'num_stars_tracked':
+                # Red if <2, yellow if 2-4, green if 5+
+                if value < 2:
+                    return self.colors['bg_tlm_warning']
+                elif value < 5:
+                    return self.colors['bg_tlm_caution']
+                else:
+                    return self.colors['bg_tlm_good']
+                    
+            elif key == 'attitude_accuracy':
+                # Green if <5 arcsec, yellow if 5-15, red if >15 or 0 (invalid)
+                if value == 0 or value > 15:
+                    return self.colors['bg_tlm_warning']
+                elif value > 5:
+                    return self.colors['bg_tlm_caution']
+                else:
+                    return self.colors['bg_tlm_good']
+                    
+            elif key in ['roll', 'pitch', 'yaw']:
+                # Use same thresholds as ADCS attitude
+                abs_val = abs(value)
+                if abs_val > 10:
+                    return self.colors['bg_tlm_warning']
+                elif abs_val > 5:
+                    return self.colors['bg_tlm_caution']
+                else:
+                    return self.colors['bg_tlm_good']
+                    
+            elif key == 'sensor_temp':
+                # Star tracker sensor temperature
+                if value > 40 or value < -30:
+                    return self.colors['bg_tlm_warning']
+                elif value > 35 or value < -20:
                     return self.colors['bg_tlm_caution']
                 else:
                     return self.colors['bg_tlm_good']
