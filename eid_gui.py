@@ -139,14 +139,12 @@ class EIDGUI:
             'cdh': {
                 'system': 'Command & Data Handling',
                 'commands': [
-                    ("� Status Check", "CDH_STATUS"),
                     ("🔄 Power Cycle", "CDH_POWER_CYCLE"),
                 ]
             },
             'ttc': {
                 'system': 'TT&C Ground Interface',
                 'commands': [
-                    ("📊 Link Check", "TTC_STATUS"),
                     ("🔄 Power Cycle", "TTC_POWER_CYCLE"),
                 ]
             },
@@ -169,12 +167,15 @@ class EIDGUI:
             'orbit': {
                 'system': 'Orbital Parameters',
                 'commands': [
-                    ("📍 Orbit Status", "ORBIT_STATUS"),
+                    # No active commands - read-only telemetry
                 ]
             },
             'system': {
                 'system': 'System Controls',
                 'commands': [
+                    ("🛡️ Enter Safe Mode", "SAFE_MODE"),
+                    ("✅ Exit Safe Mode", "EXIT_SAFE_MODE"),
+                    ("🔄 System Reset", "SYS_RESET"),
                     ("⚠️ Enable Fault Injection", "FAULT_INJECTION_ENABLE"),
                     ("✅ Disable Fault Injection", "FAULT_INJECTION_DISABLE"),
                 ]
@@ -375,13 +376,25 @@ class EIDGUI:
                 self.open_adcs_goto_dialog(self.root)
                 return
             
-            spacecraft.send_command(command)
+            # Special handling for COMM_TX - prompt for timeout
+            if command == "COMM_TX":
+                self.open_comm_tx_dialog(self.root)
+                return
+            
+            # Send command and check result
+            queued = spacecraft.send_command(command)
+            import time
+            time.sleep(0.2)
+            success = queued and (spacecraft.last_command == command) and spacecraft.last_command_success
         
             # Log command to experiment manager if active
             try:
                 from experiment_manager import experiment_manager
                 if experiment_manager and experiment_manager.is_running:
-                    experiment_manager.log_command(command)
+                    if not success:
+                        experiment_manager.log_command(command, success=False, error_msg="Command rejected by spacecraft")
+                    else:
+                        experiment_manager.log_command(command)
             except:
                 pass  # Experiment manager not active
         except Exception as e:
@@ -512,13 +525,25 @@ class EIDGUI:
                 self.open_adcs_goto_dialog(window)
                 return
             
-            spacecraft.send_command(command)
+            # Special handling for COMM_TX - prompt for timeout
+            if command == "COMM_TX":
+                self.open_comm_tx_dialog(window)
+                return
+            
+            # Send command and check result
+            queued = spacecraft.send_command(command)
+            import time
+            time.sleep(0.2)
+            success = queued and (spacecraft.last_command == command) and spacecraft.last_command_success
         
             # Log command to experiment manager if active
             try:
                 from experiment_manager import experiment_manager
                 if experiment_manager and experiment_manager.is_running:
-                    experiment_manager.log_command(command)
+                    if not success:
+                        experiment_manager.log_command(command, success=False, error_msg="Command rejected by spacecraft")
+                    else:
+                        experiment_manager.log_command(command)
                     if not experiment_manager.anomaly_resolved_time:
                         experiment_manager.mark_anomaly_resolved()
             except:
@@ -587,13 +612,20 @@ class EIDGUI:
                 yaw = float(yaw_entry.get())
                 
                 command = f"ADCS_GO_TO {roll} {pitch} {yaw}"
-                spacecraft.send_command(command)
+                # Send command and check result
+                queued = spacecraft.send_command(command)
+                import time
+                time.sleep(0.2)
+                success = queued and (spacecraft.last_command == command) and spacecraft.last_command_success
                 
                 # Log command to experiment manager if active
                 try:
                     from experiment_manager import experiment_manager
                     if experiment_manager and experiment_manager.is_running:
-                        experiment_manager.log_command(command)
+                        if not success:
+                            experiment_manager.log_command(command, success=False, error_msg="Command rejected by spacecraft")
+                        else:
+                            experiment_manager.log_command(command)
                         if not experiment_manager.anomaly_resolved_time:
                             experiment_manager.mark_anomaly_resolved()
                 except:
@@ -632,6 +664,112 @@ class EIDGUI:
         # Focus on roll entry
         roll_entry.focus_set()
         roll_entry.select_range(0, tk.END)
+    
+    def open_comm_tx_dialog(self, parent_window):
+        """Open dialog to input timeout for COMM_TX command"""
+        dialog = tk.Toplevel(self.root)
+        dialog.title("📡 COMM TX Mode")
+        dialog.geometry("350x220")
+        dialog.configure(bg=self.colors['bg_main'])
+        dialog.transient(parent_window)
+        dialog.grab_set()
+        
+        # Title
+        title_frame = tk.Frame(dialog, bg=self.colors['bg_panel'], pady=8)
+        title_frame.pack(fill=tk.X, padx=10, pady=(10, 5))
+        tk.Label(title_frame, text="📡 Enter TX Timeout",
+                font=self.font_title,
+                bg=self.colors['bg_panel'],
+                fg=self.colors['fg_main']).pack()
+        
+        # Info label
+        info_label = tk.Label(dialog, 
+                             text="Specify duration for TX mode (seconds).\nWill auto-revert to RX when timeout expires.",
+                             font=('Segoe UI', 9),
+                             bg=self.colors['bg_main'], 
+                             fg=self.colors['fg_secondary'],
+                             justify=tk.CENTER)
+        info_label.pack(pady=(5, 10))
+        
+        # Input frame
+        input_frame = tk.Frame(dialog, bg=self.colors['bg_main'])
+        input_frame.pack(padx=20, pady=5, fill=tk.X)
+        
+        # Timeout input
+        tk.Label(input_frame, text="Timeout (seconds):", font=('Segoe UI', 10),
+                bg=self.colors['bg_main'], fg=self.colors['fg_main']).grid(row=0, column=0, sticky='e', padx=5, pady=5)
+        timeout_entry = tk.Entry(input_frame, font=('Segoe UI', 10), width=15)
+        timeout_entry.grid(row=0, column=1, padx=5, pady=5)
+        timeout_entry.insert(0, "60")
+        
+        # Error label (above buttons)
+        error_label = tk.Label(dialog, text="", font=('Segoe UI', 9),
+                              bg=self.colors['bg_main'], fg=self.colors['bg_tlm_warning'])
+        error_label.pack(pady=(10, 5))
+        
+        # Button frame
+        button_frame = tk.Frame(dialog, bg=self.colors['bg_main'])
+        button_frame.pack(pady=(0, 15))
+        
+        def execute_tx():
+            try:
+                timeout = float(timeout_entry.get())
+                if timeout <= 0:
+                    error_label.config(text="⚠️ Timeout must be positive")
+                    return
+                
+                command = f"COMM_TX {timeout:.0f}"
+                # Send command and check result
+                queued = spacecraft.send_command(command)
+                import time
+                time.sleep(0.2)
+                success = queued and (spacecraft.last_command == command) and spacecraft.last_command_success
+                
+                # Log command to experiment manager if active
+                try:
+                    from experiment_manager import experiment_manager
+                    if experiment_manager and experiment_manager.is_running:
+                        if not success:
+                            experiment_manager.log_command(command, success=False, error_msg="Command rejected by spacecraft")
+                        else:
+                            experiment_manager.log_command(command)
+                        if not experiment_manager.anomaly_resolved_time:
+                            experiment_manager.mark_anomaly_resolved()
+                except:
+                    pass
+                
+                dialog.destroy()
+            except ValueError:
+                error_label.config(text="⚠️ Invalid input - enter a number")
+        
+        def cancel():
+            dialog.destroy()
+        
+        # Execute button
+        exec_btn = tk.Button(button_frame, text="Execute",
+                            command=execute_tx,
+                            bg=self.colors['button_nominal'],
+                            fg='white',
+                            font=self.font_button,
+                            width=12,
+                            relief=tk.RAISED, bd=2,
+                            cursor='hand2')
+        exec_btn.pack(side=tk.LEFT, padx=5)
+        
+        # Cancel button
+        cancel_btn = tk.Button(button_frame, text="Cancel",
+                              command=cancel,
+                              bg=self.colors['fg_secondary'],
+                              fg='white',
+                              font=self.font_button,
+                              width=12,
+                              relief=tk.RAISED, bd=2,
+                              cursor='hand2')
+        cancel_btn.pack(side=tk.LEFT, padx=5)
+        
+        # Focus on timeout entry
+        timeout_entry.focus_set()
+        timeout_entry.select_range(0, tk.END)
     
     def open_anomaly_window(self):
         """Open generic anomaly response command window (fallback)"""
@@ -712,13 +850,20 @@ class EIDGUI:
     def execute_anomaly_response(self, command, window):
             """Execute an anomaly response command with error handling"""
             try:
-                spacecraft.send_command(command)
+                # Send command and check result
+                queued = spacecraft.send_command(command)
+                import time
+                time.sleep(0.2)
+                success = queued and (spacecraft.last_command == command) and spacecraft.last_command_success
             
                 # Log command to experiment manager if active
                 try:
                     from experiment_manager import experiment_manager
                     if experiment_manager and experiment_manager.is_running:
-                        experiment_manager.log_command(command)
+                        if not success:
+                            experiment_manager.log_command(command, success=False, error_msg="Command rejected by spacecraft")
+                        else:
+                            experiment_manager.log_command(command)
                         # If this is a resolution command, mark anomaly as resolved
                         if not experiment_manager.anomaly_resolved_time:
                             experiment_manager.mark_anomaly_resolved()
@@ -732,57 +877,71 @@ class EIDGUI:
         
     def update_data(self):
         """Update all displays with latest data"""
-        telemetry = spacecraft.get_telemetry()
-        
-        # Update TLM displays organized by subsystem
-        for subsystem, label_list in self.subsystem_labels.items():
-            subsystem_data = telemetry.get(subsystem, {})
+        try:
+            telemetry = spacecraft.get_telemetry()
             
-            for tlm_key, label in label_list:
-                if tlm_key in subsystem_data:
-                    value = subsystem_data[tlm_key]
-                    display_name = tlm_key.replace('_', ' ').title()
-                    
-                    # Check for stale telemetry indicator (value ends with ' S')
-                    if isinstance(value, str) and value.endswith(' S'):
-                        # Stale telemetry - show last known value with 'S' indicator
-                        base_value = value[:-2]  # Remove ' S' suffix
-                        label.config(text=f"{display_name}\n{base_value} S", bg='gray', fg='orange')
-                    elif value == 'S':
-                        # Legacy stale format (for backward compatibility)
-                        label.config(text=f"{display_name}\nS", bg='gray', fg='orange')
-                    else:
-                        # Determine color based on value (traffic light system)
-                        color = self.get_tlm_color(subsystem, tlm_key, value, subsystem_data)
-                        
-                        # Format value
-                        if isinstance(value, float):
-                            value_str = f"{value:.2f}"
-                        elif isinstance(value, int):
-                            value_str = str(value)
-                        else:
-                            value_str = str(value)
-                        
-                        label.config(text=f"{display_name}\n{value_str}", bg=color, fg='white')
-                else:
-                    label.config(text=f"{tlm_key}\nN/A", bg='gray', fg='white')
+            # Update TLM displays organized by subsystem
+            for subsystem, label_list in self.subsystem_labels.items():
+                subsystem_data = telemetry.get(subsystem, {})
                 
-        # Update EVR log
-        evr_log = spacecraft.get_evr_log()
-        self.evr_text.config(state=tk.NORMAL)
-        self.evr_text.delete(1.0, tk.END)
-        
-        # Show last 15 entries
-        for entry in evr_log[-15:]:
-            self.evr_text.insert(tk.END, entry + "\n")
+                for tlm_key, label in label_list:
+                    try:
+                        if tlm_key in subsystem_data:
+                            value = subsystem_data[tlm_key]
+                            # Custom display names for star tracker body frame attitudes
+                            if subsystem == 'star_tracker' and tlm_key in ['roll', 'pitch', 'yaw']:
+                                display_name = 'ST ' + tlm_key.replace('_', ' ').title()
+                            else:
+                                display_name = tlm_key.replace('_', ' ').title()
+                            
+                            # Check for stale telemetry indicator (value ends with ' S')
+                            if isinstance(value, str) and value.endswith(' S'):
+                                # Stale telemetry - show last known value with 'S' indicator
+                                base_value = value[:-2]  # Remove ' S' suffix
+                                label.config(text=f"{display_name}\n{base_value} S", bg='gray', fg='orange')
+                            elif value == 'S':
+                                # Legacy stale format (for backward compatibility)
+                                label.config(text=f"{display_name}\nS", bg='gray', fg='orange')
+                            else:
+                                # Determine color based on value (traffic light system)
+                                color = self.get_tlm_color(subsystem, tlm_key, value, subsystem_data, telemetry)
+                                
+                                # Format value
+                                if isinstance(value, float):
+                                    value_str = f"{value:.2f}"
+                                elif isinstance(value, int):
+                                    value_str = str(value)
+                                else:
+                                    value_str = str(value)
+                                
+                                label.config(text=f"{display_name}\n{value_str}", bg=color, fg='white')
+                        else:
+                            label.config(text=f"{tlm_key}\nN/A", bg='gray', fg='white')
+                    except Exception as e:
+                        # If individual label update fails, log and continue
+                        print(f"Error updating {subsystem}.{tlm_key}: {e}")
+                        label.config(text=f"{tlm_key}\nERROR", bg='gray', fg='red')
+                    
+            # Update EVR log
+            evr_log = spacecraft.get_evr_log()
+            self.evr_text.config(state=tk.NORMAL)
+            self.evr_text.delete(1.0, tk.END)
             
-        self.evr_text.see(tk.END)
-        self.evr_text.config(state=tk.DISABLED)
+            # Show last 15 entries
+            for entry in evr_log[-15:]:
+                self.evr_text.insert(tk.END, entry + "\n")
+                
+            self.evr_text.see(tk.END)
+            self.evr_text.config(state=tk.DISABLED)
+            
+        except Exception as e:
+            # If overall update fails, log error but continue updating
+            print(f"Error in update_data: {e}")
         
-        # Schedule next update (1 Hz)
+        # Always schedule next update (1 Hz) - even if there was an error
         self.root.after(1000, self.update_data)
         
-    def get_tlm_color(self, subsystem, key, value, subsystem_data=None):
+    def get_tlm_color(self, subsystem, key, value, subsystem_data=None, telemetry=None):
         """Get traffic light color based on telemetry value"""
         # Green = nominal, Yellow = caution, Red = warning
         
@@ -1038,20 +1197,44 @@ class EIDGUI:
                 # Green if <5 arcsec, yellow if 5-15, red if >15 or 0 (invalid)
                 if value == 0 or value > 15:
                     return self.colors['bg_tlm_warning']
-                elif value > 5:
-                    return self.colors['bg_tlm_caution']
-                else:
-                    return self.colors['bg_tlm_good']
                     
             elif key in ['roll', 'pitch', 'yaw']:
-                # Use same thresholds as ADCS attitude
-                abs_val = abs(value)
-                if abs_val > 10:
-                    return self.colors['bg_tlm_warning']
-                elif abs_val > 5:
+                # Star Tracker body frame attitudes - compare with ADCS commanded attitude
+                # Green when ST measurement agrees with ADCS solution, C&W on excursion
+                if not telemetry or 'adcs' not in telemetry:
+                    return self.colors['bg_tlm_good']  # No ADCS data to compare
+                
+                adcs_data = telemetry['adcs']
+                st_valid = subsystem_data.get('attitude_valid', False) if subsystem_data else False
+                
+                if not st_valid:
+                    # Star tracker not providing valid solution
                     return self.colors['bg_tlm_caution']
+                
+                # Get ADCS actual attitude (what spacecraft is actually doing)
+                adcs_roll = adcs_data.get('roll', 0.0)
+                adcs_pitch = adcs_data.get('pitch', 0.0)
+                adcs_yaw = adcs_data.get('yaw', 0.0)
+                
+                # Calculate error between star tracker measurement and ADCS attitude
+                # (represents sensor agreement / spacecraft body frame alignment)
+                if key == 'roll':
+                    error = (value - adcs_roll + 180) % 360 - 180
+                elif key == 'pitch':
+                    error = (value - adcs_pitch + 180) % 360 - 180
+                else:  # yaw
+                    error = (value - adcs_yaw + 180) % 360 - 180
+                
+                abs_error = abs(error)
+                
+                # ST measurement should closely match ADCS attitude
+                # Thresholds: <1° = green (sensor agreement), <3° = yellow, >3° = red (excursion)
+                if abs_error > 3.0:
+                    return self.colors['bg_tlm_warning']  # Significant excursion
+                elif abs_error > 1.0:
+                    return self.colors['bg_tlm_caution']  # Moderate disagreement
                 else:
-                    return self.colors['bg_tlm_good']
+                    return self.colors['bg_tlm_good']  # Good agreement
                     
             elif key == 'sensor_temp':
                 # Star tracker sensor temperature

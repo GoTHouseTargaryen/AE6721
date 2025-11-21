@@ -27,6 +27,9 @@ class ExperimentGUI:
         # Define nominal procedure (can be customized)
         self.nominal_procedure = []
         
+        # Set up window close handler
+        self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
+        
         self.create_widgets()
         self.update_status()
         
@@ -37,26 +40,48 @@ class ExperimentGUI:
                         bg='#2d2d30', fg='white', pady=10)
         title.pack()
         
+        # Researcher Input Frame
+        input_frame = tk.LabelFrame(self.root, text="Researcher Inputs (Required)",
+                                   font=('Segoe UI', 11, 'bold'),
+                                   bg='#3c3c3c', fg='white', bd=2)
+        input_frame.pack(fill=tk.X, padx=15, pady=10)
+        
+        # Subject Number
+        tk.Label(input_frame, text="Subject Number:", 
+                bg='#3c3c3c', fg='white', font=('Segoe UI', 10)).grid(row=0, column=0, padx=10, pady=5, sticky=tk.W)
+        self.subject_number_var = tk.StringVar()
+        subject_entry = tk.Entry(input_frame, textvariable=self.subject_number_var, 
+                                font=('Segoe UI', 10), width=20, bg='#1e1e1e', fg='white', insertbackground='white')
+        subject_entry.grid(row=0, column=1, padx=10, pady=5, sticky=tk.W)
+        
+        # Run Type
+        tk.Label(input_frame, text="Run Type:", 
+                bg='#3c3c3c', fg='white', font=('Segoe UI', 10)).grid(row=1, column=0, padx=10, pady=5, sticky=tk.W)
+        self.run_type_var = tk.StringVar(value="Control Nominal")
+        run_type_dropdown = ttk.Combobox(input_frame, textvariable=self.run_type_var, 
+                                        font=('Segoe UI', 9), width=25, state='readonly')
+        run_type_dropdown['values'] = ('Control Nominal', 'EID Nominal', 'Control Off-Nominal', 'EID Off-Nominal')
+        run_type_dropdown.grid(row=1, column=1, padx=10, pady=5, sticky=tk.W)
+        
         # Scenario Selection Frame
         scenario_frame = tk.LabelFrame(self.root, text="Scenario Configuration",
                                       font=('Segoe UI', 11, 'bold'),
                                       bg='#3c3c3c', fg='white', bd=2)
         scenario_frame.pack(fill=tk.X, padx=15, pady=10)
         
-        # Scenario type
-        tk.Label(scenario_frame, text="Scenario Type:", 
+        # Scenario type info
+        tk.Label(scenario_frame, text="Scenario Info:", 
                 bg='#3c3c3c', fg='white', font=('Segoe UI', 10)).grid(row=0, column=0, padx=10, pady=5, sticky=tk.W)
         
-        self.scenario_var = tk.StringVar(value="nominal")
-        tk.Radiobutton(scenario_frame, text="Nominal (5 min)", variable=self.scenario_var,
-                      value="nominal", bg='#3c3c3c', fg='white', selectcolor='#0e7c0e',
-                      font=('Segoe UI', 9)).grid(row=0, column=1, padx=5, pady=5)
-        tk.Radiobutton(scenario_frame, text="Anomaly (10 min)", variable=self.scenario_var,
-                      value="anomaly", bg='#3c3c3c', fg='white', selectcolor='#e74c3c',
-                      font=('Segoe UI', 9)).grid(row=0, column=2, padx=5, pady=5)
+        info_text = tk.Label(scenario_frame, 
+                           text="• Nominal scenarios: 5 minutes, auto-launches appropriate GUI\n"
+                                "• Off-Nominal scenarios: 10 minutes, 2 compound faults (3-5 min), auto-launches appropriate GUI\n"
+                                "• Faults are auto-injected - no manual researcher intervention needed",
+                           bg='#3c3c3c', fg='#aaaaaa', font=('Segoe UI', 9), justify=tk.LEFT)
+        info_text.grid(row=0, column=1, columnspan=3, padx=5, pady=5, sticky=tk.W)
         
         # Nominal Procedure Input
-        tk.Label(scenario_frame, text="Nominal Procedure:", 
+        tk.Label(scenario_frame, text="Nominal Procedure (editable):", 
                 bg='#3c3c3c', fg='white', font=('Segoe UI', 10)).grid(row=1, column=0, padx=10, pady=5, sticky=tk.NW)
         
         procedure_frame = tk.Frame(scenario_frame, bg='#3c3c3c')
@@ -66,26 +91,47 @@ class ExperimentGUI:
                                                         font=('Consolas', 9),
                                                         bg='#1e1e1e', fg='white')
         self.procedure_text.pack()
-        self.procedure_text.insert('1.0', "# Enter nominal procedure commands (one per line)\n# Example:\nATT_NADIR\nMODE_NOMINAL\nCLEAR_CAUTIONS")
+        # Default nominal procedure commands - can be edited before starting experiment
+        default_procedure = """# Full Nominal Operations Procedure
+COMM_TX_RX
+ADCS_ON
+EPS_DEPLOY_ARRAY_A
+EPS_DEPLOY_ARRAY_B
+TCS_DEPLOY_RADIATOR
+GPS_ON
+STAR_TRACKER_ON
+ADCS_SUN_POINT
+PROP_STANDBY
+PROP_ON
+PROP_HEATER_ON
+ADCS_DESAT
+ADCS_GO_TO 50 -50 100
+PROP_VALVE_OPEN
+PROP_VALVE_CLOSE
+ADCS_SUN_POINT
+PROP_VALVE_CLOSE
+PROP_HEATER_OFF
+PROP_OFF"""
+        self.procedure_text.insert('1.0', default_procedure)
         
         # Start/Stop Buttons
         button_frame = tk.Frame(scenario_frame, bg='#3c3c3c')
         button_frame.grid(row=2, column=0, columnspan=3, pady=10)
         
-        self.start_btn = tk.Button(button_frame, text="▶ Start Scenario",
-                                   command=self.start_scenario,
+        self.start_btn = tk.Button(button_frame, text="▶ Start Experiment",
+                                   command=self.start_experiment,
                                    bg='#0e7c0e', fg='white', font=('Segoe UI', 10, 'bold'),
                                    width=15, height=2, cursor='hand2')
         self.start_btn.grid(row=0, column=0, padx=5)
         
-        self.stop_btn = tk.Button(button_frame, text="⏹ Stop Scenario",
+        self.stop_btn = tk.Button(button_frame, text="⏹ Stop Experiment",
                                   command=self.stop_scenario,
                                   bg='#e74c3c', fg='white', font=('Segoe UI', 10, 'bold'),
                                   width=15, height=2, cursor='hand2', state=tk.DISABLED)
         self.stop_btn.grid(row=0, column=1, padx=5)
         
-        # Operator Action Buttons Frame
-        action_frame = tk.LabelFrame(self.root, text="Operator Actions",
+        # Procedure Timing Frame (For Researcher Use)
+        action_frame = tk.LabelFrame(self.root, text="Procedure Timing (Optional)",
                                      font=('Segoe UI', 11, 'bold'),
                                      bg='#3c3c3c', fg='white', bd=2)
         action_frame.pack(fill=tk.X, padx=15, pady=10)
@@ -93,30 +139,20 @@ class ExperimentGUI:
         btn_frame = tk.Frame(action_frame, bg='#3c3c3c')
         btn_frame.pack(pady=10)
         
-        tk.Button(btn_frame, text="✓ Anomaly Detected",
-                 command=self.mark_anomaly_detected,
-                 bg='#f1c40f', fg='black', font=('Segoe UI', 9, 'bold'),
-                 width=18, height=2).grid(row=0, column=0, padx=5, pady=5)
-        
-        tk.Button(btn_frame, text="✓ Anomaly Resolved",
-                 command=self.mark_anomaly_resolved,
-                 bg='#0e7c0e', fg='white', font=('Segoe UI', 9, 'bold'),
-                 width=18, height=2).grid(row=0, column=1, padx=5, pady=5)
-        
         tk.Button(btn_frame, text="⏱ Start Procedure",
                  command=self.start_procedure,
                  bg='#007acc', fg='white', font=('Segoe UI', 9, 'bold'),
-                 width=18, height=2).grid(row=1, column=0, padx=5, pady=5)
+                 width=18, height=2).grid(row=0, column=0, padx=5, pady=5)
         
         tk.Button(btn_frame, text="⏱ End Procedure",
                  command=self.end_procedure,
                  bg='#9b59b6', fg='white', font=('Segoe UI', 9, 'bold'),
-                 width=18, height=2).grid(row=1, column=1, padx=5, pady=5)
+                 width=18, height=2).grid(row=0, column=1, padx=5, pady=5)
         
         # Info label for procedure instructions
         procedure_info = tk.Label(action_frame, 
-                                 text="Note: 'Start Procedure' loads procedure for verification.\n"
-                                      "Test subject executes commands manually with paper procedure.",
+                                 text="Use these buttons to time when subject starts/completes the nominal procedure.\n"
+                                      "Procedure is auto-loaded at experiment start. Anomalies are auto-detected.",
                                  font=('Segoe UI', 8, 'italic'),
                                  bg='#3c3c3c', fg='#cccccc', justify=tk.LEFT)
         procedure_info.pack(pady=5)
@@ -140,10 +176,23 @@ class ExperimentGUI:
                        bg='#2d2d30', fg='#cccccc')
         info.pack(pady=5)
         
-    def start_scenario(self):
-        """Start the selected scenario"""
-        scenario_type = self.scenario_var.get()
-        duration = 5 if scenario_type == "nominal" else 10
+    def start_experiment(self):
+        """Start the experiment and auto-launch appropriate GUI"""
+        # Validate researcher inputs
+        subject_number = self.subject_number_var.get().strip()
+        run_type = self.run_type_var.get()
+        
+        if not subject_number:
+            messagebox.showwarning("Missing Input", "Please enter a Subject Number.")
+            return
+        
+        # Determine scenario type based on run type
+        if "Nominal" in run_type:
+            scenario_type = "nominal"
+            duration = 5
+        else:  # Off-Nominal
+            scenario_type = "off-nominal"
+            duration = 10
         
         # Parse nominal procedure from text box
         procedure_text = self.procedure_text.get('1.0', tk.END)
@@ -155,44 +204,86 @@ class ExperimentGUI:
                                  "Please define at least one nominal procedure command.")
             return
         
-        # Start scenario
-        success = self.exp_mgr.start_scenario(scenario_type, duration, procedures)
+        # Start scenario with researcher inputs
+        success = self.exp_mgr.start_scenario(scenario_type, duration, procedures, 
+                                            subject_number=subject_number, 
+                                            run_type=run_type)
         
         if success:
             self.start_btn.config(state=tk.DISABLED)
             self.stop_btn.config(state=tk.NORMAL)
-            messagebox.showinfo("Scenario Started", 
-                              f"{scenario_type.title()} scenario started for {duration} minutes.\n"
-                              f"Nominal procedure: {len(procedures)} commands")
+            
+            # Update procedure text box to show the actual loaded procedure
+            self.procedure_text.delete('1.0', tk.END)
+            self.procedure_text.insert('1.0', "# Loaded nominal procedure\n" + "\n".join(procedures))
+            
+            # Auto-launch appropriate GUI based on run type
+            import subprocess
+            import sys
+            
+            if "Control" in run_type:
+                # Launch Control GUI
+                subprocess.Popen([sys.executable, "control_gui.py"])
+                gui_type = "Control GUI"
+            else:  # EID
+                # Launch EID GUI
+                subprocess.Popen([sys.executable, "eid_gui.py"])
+                gui_type = "EID GUI"
+            
+            # Auto-start procedure timing
+            self.exp_mgr.start_procedure_timing()
+            
+            messagebox.showinfo("Experiment Started", 
+                              f"{scenario_type.title()} experiment started ({duration} min)\n\n"
+                              f"Subject: {subject_number}\n"
+                              f"Run Type: {run_type}\n"
+                              f"GUI Launched: {gui_type}\n"
+                              f"Procedure: {len(procedures)} commands (auto-loaded)\n\n"
+                              f"{'Off-nominal: 2 compound faults will inject at 3-5 min' if scenario_type == 'off-nominal' else 'Nominal: No faults'}")
         else:
-            messagebox.showerror("Error", "Failed to start scenario. One may already be running.")
+            messagebox.showerror("Error", "Failed to start experiment. One may already be running.")
             
     def stop_scenario(self):
-        """Stop the current scenario"""
+        """Stop the current experiment"""
         self.exp_mgr.stop_scenario()
         self.start_btn.config(state=tk.NORMAL)
         self.stop_btn.config(state=tk.DISABLED)
-        messagebox.showinfo("Scenario Stopped", "Scenario has been stopped and data saved.")
         
-    def mark_anomaly_detected(self):
-        """Mark that operator detected the anomaly"""
-        self.exp_mgr.mark_anomaly_detected()
-        messagebox.showinfo("Marked", "Anomaly detection time recorded.")
+        # Restore default procedure template
+        self.procedure_text.delete('1.0', tk.END)
+        default_procedure = """# Full Nominal Operations Procedure
+COMM_TX_RX
+ADCS_ON
+EPS_DEPLOY_ARRAY_A
+EPS_DEPLOY_ARRAY_B
+TCS_DEPLOY_RADIATOR
+GPS_ON
+STAR_TRACKER_ON
+ADCS_SUN_POINT
+PROP_STANDBY
+PROP_ON
+PROP_HEATER_ON
+ADCS_DESAT
+ADCS_GO_TO 50 -50 100
+PROP_VALVE_OPEN
+PROP_VALVE_CLOSE
+ADCS_SUN_POINT
+PROP_VALVE_CLOSE
+PROP_HEATER_OFF
+PROP_OFF"""
+        self.procedure_text.insert('1.0', default_procedure)
         
-    def mark_anomaly_resolved(self):
-        """Mark that anomaly was resolved"""
-        self.exp_mgr.mark_anomaly_resolved()
-        messagebox.showinfo("Marked", "Anomaly resolution time recorded.")
-        
+        messagebox.showinfo("Experiment Stopped", "Experiment has been stopped and data saved.")
+    
     def start_procedure(self):
-        """Start timing a nominal procedure - loads procedure for verification"""
-        self.exp_mgr.start_procedure_timing()
-        messagebox.showinfo("Procedure Started", 
-                          "Procedure timing started.\n\n"
-                          "The test subject should now execute the procedure\n"
-                          "they have in hand. Commands will be verified against\n"
-                          "the loaded procedure in the background.")
-        
+        """Start timing a nominal procedure"""
+        if not self.exp_mgr.procedure_start_time:
+            self.exp_mgr.start_procedure_timing()
+            messagebox.showinfo("Procedure Timing Started", 
+                              "Procedure timing started. Commands will be verified against loaded procedure.")
+        else:
+            messagebox.showinfo("Already Started", "Procedure timing was already started at experiment launch.")
+    
     def end_procedure(self):
         """End timing a nominal procedure"""
         self.exp_mgr.end_procedure_timing()
@@ -223,6 +314,15 @@ class ExperimentGUI:
         
         # Schedule next update
         self.root.after(1000, self.update_status)
+    
+    def on_closing(self):
+        """Handle window close event - stop experiment if running"""
+        if self.exp_mgr and self.exp_mgr.is_running:
+            if messagebox.askokcancel("Quit", "Experiment is running. Stop experiment and close?"):
+                self.exp_mgr.stop_scenario()
+                self.root.destroy()
+        else:
+            self.root.destroy()
 
 
 def main():

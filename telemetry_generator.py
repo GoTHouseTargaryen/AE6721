@@ -369,6 +369,13 @@ class SpacecraftSimulator:
             'comm_overtemp': False,
             'storage_full': False,
             'adcs_control_lost': False,
+            # Compound anomaly states (off-nominal scenario)
+            'battery_a_drain': False,
+            'battery_b_drain': False,
+            'solar_array_a_fault': False,
+            'solar_array_b_fault': False,
+            'prop_valve_stuck_open': False,
+            'tcs_heaters_stuck_on': False,
         }
         
         # Fault injection control
@@ -378,9 +385,17 @@ class SpacecraftSimulator:
         self.fault_scheduled_time = None
         self.fault_injected = False
         
+        # Experimental fault system (for researcher-controlled experiments)
+        self.experimental_fault_active = False
+        self.experimental_fault_type = None  # 'CDH', 'TTC', or 'AVI'
+        self.experimental_fault_stale_subsystems = []  # Which subsystems have stale telemetry
+        self.commanding_without_telemetry_count = 0
+        
         # Command queue
         self.command_queue = []
         self.command_counter = 0
+        self.last_command = None
+        self.last_command_success = True
         
     def start(self):
         """Start the simulation"""
@@ -462,15 +477,31 @@ class SpacecraftSimulator:
             if self.orbit_state['eclipse']:
                 self.orbit_state['sun_angle'] = 0.0  # No sun in eclipse
             else:
-                # Sun angle depends on position in orbit and beta angle
+                # Base sun angle from orbital geometry (sun direction in orbit frame)
                 # At beta=0: sun angle varies 0-90° over orbit
                 # At beta=90: sun angle constant (perpendicular to orbit plane)
                 sun_elevation = math.sin(beta_rad)  # Component perpendicular to orbit
                 sun_azimuth = math.cos(beta_rad) * math.cos(orbit_phase - eclipse_center)  # In-plane component
                 
-                # Combined sun angle (0° = perpendicular to panels, 90° = edge-on)
-                sun_angle_rad = math.acos(max(-1.0, min(1.0, math.sqrt(sun_elevation**2 + sun_azimuth**2))))
-                self.orbit_state['sun_angle'] = math.degrees(sun_angle_rad)
+                # Base sun angle in orbit frame (assumes +X points at sun at roll=0)
+                base_sun_angle_rad = math.acos(max(-1.0, min(1.0, math.sqrt(sun_elevation**2 + sun_azimuth**2))))
+                base_sun_angle = math.degrees(base_sun_angle_rad)
+                
+                # Adjust sun angle based on spacecraft attitude
+                # Solar panels are on -X axis, so optimal pointing is roll=180°
+                # Simplified model: sun angle affected primarily by roll error from optimal
+                roll_error = abs((self.adcs_state['roll'] - 180.0 + 180) % 360 - 180)
+                pitch_error = abs(self.adcs_state['pitch'])
+                yaw_error = abs(self.adcs_state['yaw'])
+                
+                # Attitude error increases effective sun angle
+                # Perfect sun pointing (roll=180, pitch=0, yaw=0) minimizes sun angle
+                attitude_penalty = math.sqrt(roll_error**2 + pitch_error**2 + yaw_error**2) / 3.0
+                
+                # Final sun angle: base angle modified by attitude
+                # When perfectly pointed (roll=180°), sun_angle approaches base angle
+                # When badly pointed, sun angle increases
+                self.orbit_state['sun_angle'] = min(90.0, base_sun_angle + attitude_penalty)
             
             # Update latitude and longitude (standard orbital mechanics)
             self.orbit_state['latitude'] = self.orbital_inclination * math.sin(orbit_angle)
@@ -479,7 +510,12 @@ class SpacecraftSimulator:
             self.orbit_state['velocity'] = 7.613 + random.uniform(-0.003, 0.003)
     
     def _apply_delta_v_to_orbit(self, delta_v_magnitude, direction_angles):
-        """Apply delta-V to orbital parameters using vis-viva equation
+        """Apply delta-V to orbital parameters using proper coordinate transformations
+        
+        Reference Frame:
+        - Spacecraft body frame at launch: +X axis aligned with Vernal Equinox (ECI frame)
+        - Body axes: +X forward (thrust), +Y starboard, +Z nadir
+        - Attitude angles (roll, pitch, yaw) represent rotation from initial alignment
         
         Args:
             delta_v_magnitude: Delta-V magnitude in m/s
@@ -491,64 +527,136 @@ class SpacecraftSimulator:
         
         # Current orbital parameters
         r = (r_earth + self.orbital_altitude) * 1000  # Convert to meters
-        v = self.orbit_state['velocity'] * 1000  # Convert km/s to m/s
+        v_orbital = self.orbit_state['velocity'] * 1000  # Convert km/s to m/s
         
-        # Convert attitude to thrust direction in orbital frame
-        # For simplicity, assume thrust primarily affects velocity magnitude
-        # Positive pitch increases velocity (raises orbit)
-        # Negative pitch decreases velocity (lowers orbit)
+        # COORDINATE TRANSFORMATION: Body frame → ECI frame
+        # At launch, body +X was aligned with vernal equinox (ECI +X)
+        # Current attitude represents rotation from that initial alignment
         roll_rad = math.radians(direction_angles['roll'])
         pitch_rad = math.radians(direction_angles['pitch'])
         yaw_rad = math.radians(direction_angles['yaw'])
         
-        # Decompose delta-V into radial, tangential, and normal components
-        # +X thrust in body frame, transformed by attitude
-        dv_tangential = delta_v_magnitude * math.cos(pitch_rad) * math.cos(yaw_rad)
-        dv_radial = delta_v_magnitude * math.sin(pitch_rad)
-        dv_normal = delta_v_magnitude * math.cos(pitch_rad) * math.sin(yaw_rad)
+        # Thrust is along body +X axis. Transform to ECI frame using rotation matrices.
+        # Rotation sequence: Yaw (Z) → Pitch (Y) → Roll (X)
+        # This gives us thrust direction in ECI frame
         
-        # Apply tangential delta-V (most significant for circular orbit changes)
-        v_new = v + dv_tangential
+        # Thrust vector in body frame (along +X)
+        thrust_body = [delta_v_magnitude, 0.0, 0.0]
         
-        # Calculate new orbital parameters using vis-viva equation
-        # v² = μ(2/r - 1/a) where a is semi-major axis
-        # Solve for new semi-major axis: a = 1 / (2/r - v²/μ)
-        # Check if velocity would exceed escape velocity (v² >= 2μ/r)
+        # Apply yaw rotation (about Z)
+        cy, sy = math.cos(yaw_rad), math.sin(yaw_rad)
+        thrust_after_yaw = [
+            cy * thrust_body[0] - sy * thrust_body[1],
+            sy * thrust_body[0] + cy * thrust_body[1],
+            thrust_body[2]
+        ]
+        
+        # Apply pitch rotation (about Y)
+        cp, sp = math.cos(pitch_rad), math.sin(pitch_rad)
+        thrust_after_pitch = [
+            cp * thrust_after_yaw[0] + sp * thrust_after_yaw[2],
+            thrust_after_yaw[1],
+            -sp * thrust_after_yaw[0] + cp * thrust_after_yaw[2]
+        ]
+        
+        # Apply roll rotation (about X)
+        cr, sr = math.cos(roll_rad), math.sin(roll_rad)
+        thrust_eci = [
+            thrust_after_pitch[0],
+            cr * thrust_after_pitch[1] - sr * thrust_after_pitch[2],
+            sr * thrust_after_pitch[1] + cr * thrust_after_pitch[2]
+        ]
+        
+        # For circular orbit approximation, decompose delta-V into orbital frame:
+        # Radial (toward/away from Earth), Tangential (along velocity), Normal (perpendicular to orbit plane)
+        # Assume spacecraft is at equator (latitude=0) with velocity in ECI +Y direction for simplicity
+        # This is a simplification - full orbital mechanics would track true anomaly and RAAN
+        
+        # Position vector (assume equatorial orbit, spacecraft at longitude from state)
+        lon_rad = math.radians(self.orbit_state['longitude'])
+        pos_eci = [
+            r * math.cos(lon_rad),
+            r * math.sin(lon_rad),
+            0.0  # Equatorial orbit assumption
+        ]
+        
+        # Velocity vector (perpendicular to position for circular orbit)
+        vel_eci = [
+            -v_orbital * math.sin(lon_rad),
+            v_orbital * math.cos(lon_rad),
+            0.0
+        ]
+        
+        # Decompose thrust into radial, tangential, normal components
+        # Radial: component along position vector
+        pos_mag = math.sqrt(sum(p**2 for p in pos_eci))
+        pos_unit = [p / pos_mag for p in pos_eci]
+        dv_radial = sum(thrust_eci[i] * pos_unit[i] for i in range(3))
+        
+        # Tangential: component along velocity vector
+        vel_mag = math.sqrt(sum(v**2 for v in vel_eci))
+        vel_unit = [v / vel_mag for v in vel_eci]
+        dv_tangential = sum(thrust_eci[i] * vel_unit[i] for i in range(3))
+        
+        # Normal: component perpendicular to orbit plane (cross product of radial and tangential)
+        normal_unit = [
+            pos_unit[1] * vel_unit[2] - pos_unit[2] * vel_unit[1],
+            pos_unit[2] * vel_unit[0] - pos_unit[0] * vel_unit[2],
+            pos_unit[0] * vel_unit[1] - pos_unit[1] * vel_unit[0]
+        ]
+        normal_mag = math.sqrt(sum(n**2 for n in normal_unit))
+        if normal_mag > 0:
+            normal_unit = [n / normal_mag for n in normal_unit]
+            dv_normal = sum(thrust_eci[i] * normal_unit[i] for i in range(3))
+        else:
+            dv_normal = 0.0
+        
+        # Apply delta-V components to orbital velocity
+        v_new = v_orbital + dv_tangential
+        
+        # Check escape velocity
         escape_velocity_squared = 2 * mu / r
-        
         if v_new**2 >= escape_velocity_squared:
-            # Velocity exceeds escape - clamp to 99% of escape velocity
             v_new = 0.99 * math.sqrt(escape_velocity_squared)
             self.add_evr("WARNING: Delta-V would exceed escape velocity - clamping")
         
+        # Calculate new orbital parameters
+        # Tangential delta-V affects semi-major axis
         denominator = 2.0/r - v_new**2/mu
         if denominator <= 0:
-            # Invalid orbit - this shouldn't happen with escape velocity check, but safeguard
             self.add_evr("ERROR: Invalid orbital parameters after delta-V - reverting")
             return
-            
+        
         a_new = 1.0 / denominator
         
-        # Sanity check: semi-major axis should be positive and reasonable
+        # Radial delta-V affects eccentricity (changes orbit shape)
+        # Simplified: radial thrust at periapsis/apoapsis changes eccentricity
+        # For small delta-V, approximate effect on altitude variation
+        altitude_variation = abs(dv_radial) * r / v_orbital  # meters
+        
+        # Normal delta-V affects inclination (orbit plane tilt)
+        # Δi ≈ Δv_normal / v_orbital (radians)
+        inclination_change_rad = dv_normal / v_orbital if v_orbital > 0 else 0.0
+        inclination_change_deg = math.degrees(inclination_change_rad)
+        
+        # Sanity check
         if a_new < r_earth * 1000 or a_new > r_earth * 1000 * 100:
-            # Orbit unrealistic (crashed or too high) - skip update
             self.add_evr(f"WARNING: Delta-V resulted in unrealistic orbit (a={a_new/1000:.0f}km) - skipping")
             return
         
-        # For near-circular orbit, altitude ≈ semi-major axis - Earth radius
-        altitude_new = (a_new / 1000.0) - r_earth  # Convert back to km
-        
-        # Calculate new orbital period using Kepler's third law
-        # T = 2π√(a³/μ)
-        period_new = 2 * math.pi * math.sqrt(a_new**3 / mu) / 60.0  # Convert to minutes
-        
         # Update orbital parameters
+        altitude_new = (a_new / 1000.0) - r_earth  # km
+        period_new = 2 * math.pi * math.sqrt(a_new**3 / mu) / 60.0  # minutes
+        
         self.orbital_altitude = altitude_new
         self.orbital_period = period_new
-        self.orbit_state['velocity'] = v_new / 1000.0  # Convert back to km/s
+        self.orbit_state['velocity'] = v_new / 1000.0  # km/s
         
-        # Radial and normal components affect orbit shape/inclination (simplified)
-        # For small delta-V, these effects are minor
+        # Log significant orbital changes
+        if abs(inclination_change_deg) > 0.01:
+            self.add_evr(f"Orbital inclination changed by {inclination_change_deg:.3f}° due to normal delta-V component")
+        if altitude_variation > 100:  # More than 100m altitude change
+            self.add_evr(f"Orbit eccentricity affected: altitude variation ~{altitude_variation/1000:.2f} km")
     
     def _check_fault_injection(self, elapsed_time):
         """Check if it's time to inject a fault"""
@@ -608,6 +716,61 @@ class SpacecraftSimulator:
             
             # Log to console regardless of comm mode
             print(f"[FAULT] {faulted_subsystem} system faulted - requires power cycle and reset")
+    
+    def inject_experimental_fault(self, fault_type):
+        """Inject a specific fault for experimental scenarios
+        
+        Args:
+            fault_type: 'CDH', 'TTC', or 'AVI'
+        """
+        with self.lock:
+            if self.experimental_fault_active:
+                return  # Only one experimental fault at a time
+            
+            self.experimental_fault_active = True
+            self.experimental_fault_type = fault_type
+            self.commanding_without_telemetry_count = 0
+            
+            if fault_type == 'CDH':
+                # CDH fault: Set fault flag, reject all commands except CDH_POWER_CYCLE
+                self.cdh_state['faulted'] = True
+                self.add_evr("EXPERIMENTAL FAULT: CDH FAULTED - No commands accepted until power cycle")
+                print("[EXPERIMENTAL FAULT] CDH faulted - commanding disabled until power cycle")
+                
+            elif fault_type == 'TTC':
+                # TTC fault: Make 75%+ of telemetry channels stale, TTC fault flag never goes stale
+                self.ttc_state['faulted'] = True
+                
+                # Randomly select which subsystems go stale (at least 75%)
+                all_subsystems = ['orbit', 'eps', 'adcs', 'tcs', 'avi', 'cdh', 'star_tracker', 'gps', 'prop', 'comm']
+                num_to_stale = random.randint(8, 10)  # 8-10 out of 10 = 80-100%
+                self.experimental_fault_stale_subsystems = random.sample(all_subsystems, num_to_stale)
+                
+                self.add_evr(f"EXPERIMENTAL FAULT: TTC FAULTED - {len(self.experimental_fault_stale_subsystems)}/10 subsystems telemetry stale")
+                self.add_evr(f"Stale subsystems: {', '.join(self.experimental_fault_stale_subsystems)}")
+                print(f"[EXPERIMENTAL FAULT] TTC faulted - {len(self.experimental_fault_stale_subsystems)} subsystems stale")
+                
+            elif fault_type == 'AVI':
+                # AVI fault: All telemetry goes stale except AVI fault flag
+                self.avi_state['faulted'] = True
+                self.experimental_fault_stale_subsystems = ['orbit', 'eps', 'adcs', 'tcs', 'cdh', 'ttc', 'star_tracker', 'gps', 'prop', 'comm']
+                # Note: 'avi' is not in the stale list, so AVI telemetry (including fault flag) remains visible
+                self.add_evr("EXPERIMENTAL FAULT: AVI FAULTED - All telemetry stale except AVI, commanding disabled")
+                print("[EXPERIMENTAL FAULT] AVI faulted - all telemetry stale, commanding disabled")
+    
+    def clear_experimental_fault(self):
+        """Clear experimental fault (called by power cycle commands)"""
+        with self.lock:
+            if not self.experimental_fault_active:
+                return
+            
+            fault_type = self.experimental_fault_type
+            self.experimental_fault_active = False
+            self.experimental_fault_type = None
+            self.experimental_fault_stale_subsystems = []
+            
+            self.add_evr(f"EXPERIMENTAL FAULT CLEARED: {fault_type} power cycled")
+            print(f"[EXPERIMENTAL FAULT] {fault_type} fault cleared")
             
     def _update_eps(self, elapsed_time):
         """Update Electrical Power System"""
@@ -658,6 +821,13 @@ class SpacecraftSimulator:
                 self.eps_state['solar_power_a'] = max_power_per_array * sun_exposure + random.uniform(-0.2, 0.2)
                 self.eps_state['solar_voltage_a'] = 12.4 if sun_exposure > 0.1 else 0.0
                 self.eps_state['solar_current_a'] = self.eps_state['solar_power_a'] / max(0.1, self.eps_state['solar_voltage_a'])
+                
+                # COMPOUND ANOMALY: Solar Array A Fault - zero output
+                if self.anomaly_states['solar_array_a_fault']:
+                    self.eps_state['solar_power_a'] = 0.0
+                    self.eps_state['solar_voltage_a'] = 0.0
+                    self.eps_state['solar_current_a'] = 0.0
+                    self.eps_state['solar_array_a_status'] = 'FAULTED'
             else:
                 self.eps_state['solar_power_a'] = 0.0
                 self.eps_state['solar_voltage_a'] = 0.0
@@ -668,6 +838,13 @@ class SpacecraftSimulator:
                 self.eps_state['solar_power_b'] = max_power_per_array * sun_exposure + random.uniform(-0.2, 0.2)
                 self.eps_state['solar_voltage_b'] = 12.4 if sun_exposure > 0.1 else 0.0
                 self.eps_state['solar_current_b'] = self.eps_state['solar_power_b'] / max(0.1, self.eps_state['solar_voltage_b'])
+                
+                # COMPOUND ANOMALY: Solar Array B Fault - zero output
+                if self.anomaly_states['solar_array_b_fault']:
+                    self.eps_state['solar_power_b'] = 0.0
+                    self.eps_state['solar_voltage_b'] = 0.0
+                    self.eps_state['solar_current_b'] = 0.0
+                    self.eps_state['solar_array_b_status'] = 'FAULTED'
             else:
                 self.eps_state['solar_power_b'] = 0.0
                 self.eps_state['solar_voltage_b'] = 0.0
@@ -705,41 +882,78 @@ class SpacecraftSimulator:
             if self.tcs_state['heater_prop_on']:
                 base_load += 2.0  # PROP tank heater
             
-            # Battery A charging (from Solar Array A)
-            power_balance_a = self.eps_state['solar_power_a'] - (base_load / 2.0)  # Split load
-            if power_balance_a > 0:
-                charge_rate_a = min(power_balance_a / self.eps_state['battery_a_voltage'], 2.0)
-                self.eps_state['battery_a_current'] = -charge_rate_a
-                self.eps_state['battery_a_soc'] = min(100.0, self.eps_state['battery_a_soc'] + 0.05)
+            # CROSS-CHARGING CONFIGURATION
+            # When enabled: Solar Array A can charge Battery B, Solar Array B can charge Battery A
+            # This provides redundancy if one array or battery fails
+            if self.eps_state['cross_charging_enabled']:
+                # Pool all solar power and distribute to both batteries
+                total_solar_power = self.eps_state['solar_power_a'] + self.eps_state['solar_power_b']
+                
+                # Split load across both batteries
+                load_per_battery = base_load / 2.0
+                
+                # Battery A can be charged by either solar array
+                power_balance_a = (total_solar_power / 2.0) - load_per_battery
+                if power_balance_a > 0 and self.eps_state['battery_a_soc'] < 100.0:
+                    charge_rate_a = min(power_balance_a / self.eps_state['battery_a_voltage'], 2.0)
+                    self.eps_state['battery_a_current'] = -charge_rate_a
+                    self.eps_state['battery_a_soc'] = min(100.0, self.eps_state['battery_a_soc'] + 0.05)
+                else:
+                    discharge_rate_a = abs(power_balance_a) / self.eps_state['battery_a_voltage']
+                    self.eps_state['battery_a_current'] = discharge_rate_a
+                    self.eps_state['battery_a_soc'] = max(0.0, self.eps_state['battery_a_soc'] - 0.05)
+                
+                # Battery B can be charged by either solar array
+                power_balance_b = (total_solar_power / 2.0) - load_per_battery
+                if power_balance_b > 0 and self.eps_state['battery_b_soc'] < 100.0:
+                    charge_rate_b = min(power_balance_b / self.eps_state['battery_b_voltage'], 2.0)
+                    self.eps_state['battery_b_current'] = -charge_rate_b
+                    self.eps_state['battery_b_soc'] = min(100.0, self.eps_state['battery_b_soc'] + 0.05)
+                else:
+                    discharge_rate_b = abs(power_balance_b) / self.eps_state['battery_b_voltage']
+                    self.eps_state['battery_b_current'] = discharge_rate_b
+                    self.eps_state['battery_b_soc'] = max(0.0, self.eps_state['battery_b_soc'] - 0.05)
             else:
-                discharge_rate_a = abs(power_balance_a) / self.eps_state['battery_a_voltage']
-                self.eps_state['battery_a_current'] = discharge_rate_a
-                self.eps_state['battery_a_soc'] = max(0.0, self.eps_state['battery_a_soc'] - 0.05)
+                # NORMAL MODE: Each solar array charges its own battery
+                # Battery A charged by Solar Array A only
+                power_balance_a = self.eps_state['solar_power_a'] - (base_load / 2.0)
+                if power_balance_a > 0:
+                    charge_rate_a = min(power_balance_a / self.eps_state['battery_a_voltage'], 2.0)
+                    self.eps_state['battery_a_current'] = -charge_rate_a
+                    self.eps_state['battery_a_soc'] = min(100.0, self.eps_state['battery_a_soc'] + 0.05)
+                else:
+                    discharge_rate_a = abs(power_balance_a) / self.eps_state['battery_a_voltage']
+                    self.eps_state['battery_a_current'] = discharge_rate_a
+                    self.eps_state['battery_a_soc'] = max(0.0, self.eps_state['battery_a_soc'] - 0.05)
+                
+                # Battery B charged by Solar Array B only
+                power_balance_b = self.eps_state['solar_power_b'] - (base_load / 2.0)
+                if power_balance_b > 0:
+                    charge_rate_b = min(power_balance_b / self.eps_state['battery_b_voltage'], 2.0)
+                    self.eps_state['battery_b_current'] = -charge_rate_b
+                    self.eps_state['battery_b_soc'] = min(100.0, self.eps_state['battery_b_soc'] + 0.05)
+                else:
+                    discharge_rate_b = abs(power_balance_b) / self.eps_state['battery_b_voltage']
+                    self.eps_state['battery_b_current'] = discharge_rate_b
+                    self.eps_state['battery_b_soc'] = max(0.0, self.eps_state['battery_b_soc'] - 0.05)
             
+            # Update battery voltages based on state of charge
             self.eps_state['battery_a_voltage'] = 10.2 + (self.eps_state['battery_a_soc'] / 100.0) * 2.4
-            
-            # Battery B charging (from Solar Array B)
-            power_balance_b = self.eps_state['solar_power_b'] - (base_load / 2.0)  # Split load
-            if power_balance_b > 0:
-                charge_rate_b = min(power_balance_b / self.eps_state['battery_b_voltage'], 2.0)
-                self.eps_state['battery_b_current'] = -charge_rate_b
-                self.eps_state['battery_b_soc'] = min(100.0, self.eps_state['battery_b_soc'] + 0.05)
-            else:
-                discharge_rate_b = abs(power_balance_b) / self.eps_state['battery_b_voltage']
-                self.eps_state['battery_b_current'] = discharge_rate_b
-                self.eps_state['battery_b_soc'] = max(0.0, self.eps_state['battery_b_soc'] - 0.05)
-            
             self.eps_state['battery_b_voltage'] = 10.2 + (self.eps_state['battery_b_soc'] / 100.0) * 2.4
             
-            # Cross-charging: if enabled, balance batteries
-            if self.eps_state['cross_charging_enabled']:
-                voltage_diff = self.eps_state['battery_a_voltage'] - self.eps_state['battery_b_voltage']
-                if abs(voltage_diff) > 0.1:
-                    transfer_rate = voltage_diff * 0.5  # Proportional transfer
-                    self.eps_state['battery_a_soc'] -= transfer_rate * 0.02
-                    self.eps_state['battery_b_soc'] += transfer_rate * 0.02
-                    self.eps_state['battery_a_soc'] = max(0.0, min(100.0, self.eps_state['battery_a_soc']))
-                    self.eps_state['battery_b_soc'] = max(0.0, min(100.0, self.eps_state['battery_b_soc']))
+            # COMPOUND ANOMALY: Battery Drain - voltage decreases despite positive solar power
+            # This simulates internal cell failure or short circuit
+            if self.anomaly_states['battery_a_drain']:
+                self.eps_state['battery_a_voltage'] -= 0.05  # Rapid drain: -50mV per cycle
+                self.eps_state['battery_a_soc'] = max(0.0, self.eps_state['battery_a_soc'] - 0.3)  # Fast discharge
+                if self.eps_state['battery_a_voltage'] < 10.0:
+                    self.eps_state['battery_a_voltage'] = 10.0  # Floor at 10V
+                    
+            if self.anomaly_states['battery_b_drain']:
+                self.eps_state['battery_b_voltage'] -= 0.05  # Rapid drain: -50mV per cycle
+                self.eps_state['battery_b_soc'] = max(0.0, self.eps_state['battery_b_soc'] - 0.3)  # Fast discharge
+                if self.eps_state['battery_b_voltage'] < 10.0:
+                    self.eps_state['battery_b_voltage'] = 10.0  # Floor at 10V
             
             # Bus voltage is average of both batteries
             self.eps_state['bus_voltage'] = (self.eps_state['battery_a_voltage'] + self.eps_state['battery_b_voltage']) / 2.0
@@ -954,9 +1168,19 @@ class SpacecraftSimulator:
             self.adcs_state['yaw'] = (self.adcs_state['yaw'] + 180) % 360 - 180
                 
             # Update Reaction Wheel System (RWS) - RPM and momentum
-            # Momentum (Nms) = Inertia (kg·m²) × Angular_velocity (rad/s)
+            # 3-WHEEL PYRAMID CONFIGURATION (skewed, not body-axis aligned)
+            # Wheel 1: +X biased (roll), tilted toward +Y and +Z
+            # Wheel 2: +Y biased (pitch), tilted toward +Z and +X  
+            # Wheel 3: +Z biased (yaw), tilted toward +X and +Y
+            # Each wheel contributes to multiple axes for redundancy and efficiency
+            #
+            # Wheel orientation unit vectors (normalized):
+            # Wheel 1: [0.707, 0.500, 0.500]  - primarily X, some Y/Z
+            # Wheel 2: [0.500, 0.707, 0.500]  - primarily Y, some Z/X
+            # Wheel 3: [0.500, 0.500, 0.707]  - primarily Z, some X/Y
+            # (45° tilt from each body axis)
+            
             # For 6U CubeSat reaction wheels: I ≈ 0.00015 kg·m², max RPM ≈ 6000
-            # Nominal operating RPM: 2000-4000, below 2000 indicates insufficient momentum storage
             max_rpm = 6000.0
             min_rpm = 2000.0  # Minimum nominal operating speed
             wheel_inertia = 0.00015  # kg·m²
@@ -980,83 +1204,89 @@ class SpacecraftSimulator:
                 
                 if mode == 'DETUMBLE':
                     # DETUMBLE: Wheels counter body rates to drive them to zero
-                    # Use same control approach as pointing modes
-                    control_gain = 10.0  # RPM per deg/s - allows 360° rotation without saturation
-                    
-                    # Only apply control if rates are significant (prevents drift accumulation)
-                    rate_threshold = 0.001  # deg/s - same threshold as pointing modes
-                    # Compute desired wheel changes per axis
-                    desired_x = -self.adcs_state['roll_rate'] * control_gain if abs(self.adcs_state['roll_rate']) > rate_threshold else 0.0
-                    desired_y = -self.adcs_state['pitch_rate'] * control_gain if abs(self.adcs_state['pitch_rate']) > rate_threshold else 0.0
-                    desired_z = -self.adcs_state['yaw_rate'] * control_gain if abs(self.adcs_state['yaw_rate']) > rate_threshold else 0.0
-
-                    # Compensation: if a wheel is saturated, distribute its demand to other wheels
-                    sat_x = self.adcs_state['rws_saturated_x']
-                    sat_y = self.adcs_state['rws_saturated_y']
-                    sat_z = self.adcs_state['rws_saturated_z']
-
-                    # Slightly boost remaining axes when one is saturated
-                    boost = 1.0 + 0.2 * (sat_x + sat_y + sat_z)  # 1.2x if one saturated, 1.4x if two
-
-                    # Apply X command
-                    if sat_x:
-                        # Split X demand to Y and Z
-                        self.adcs_state['rws_rpm_y'] += 0.5 * desired_x * boost
-                        self.adcs_state['rws_rpm_z'] += 0.5 * desired_x * boost
-                    else:
-                        self.adcs_state['rws_rpm_x'] += desired_x
-
-                    # Apply Y command
-                    if sat_y:
-                        self.adcs_state['rws_rpm_x'] += 0.5 * desired_y * boost
-                        self.adcs_state['rws_rpm_z'] += 0.5 * desired_y * boost
-                    else:
-                        self.adcs_state['rws_rpm_y'] += desired_y
-
-                    # Apply Z command
-                    if sat_z:
-                        self.adcs_state['rws_rpm_x'] += 0.5 * desired_z * boost
-                        self.adcs_state['rws_rpm_y'] += 0.5 * desired_z * boost
-                    else:
-                        self.adcs_state['rws_rpm_z'] += desired_z
-                    
-                elif mode in ['SUN_POINT', 'NADIR', 'INERTIAL', 'FINE_HOLD']:
-                    # POINTING MODES: Wheels maintain attitude, compensate for disturbances
-                    # Wheels respond to body rates to maintain pointing
                     control_gain = 10.0  # RPM per deg/s - allows 360° rotation without saturation
                     
                     # Only apply control if rates are significant (prevents drift accumulation)
                     rate_threshold = 0.001  # deg/s
-                    # Compute desired wheel changes per axis
-                    desired_x = -self.adcs_state['roll_rate'] * control_gain if abs(self.adcs_state['roll_rate']) > rate_threshold else 0.0
-                    desired_y = -self.adcs_state['pitch_rate'] * control_gain if abs(self.adcs_state['pitch_rate']) > rate_threshold else 0.0
-                    desired_z = -self.adcs_state['yaw_rate'] * control_gain if abs(self.adcs_state['yaw_rate']) > rate_threshold else 0.0
-
-                    # Compensation: if a wheel is saturated, distribute its demand to other wheels
-                    sat_x = self.adcs_state['rws_saturated_x']
-                    sat_y = self.adcs_state['rws_saturated_y']
-                    sat_z = self.adcs_state['rws_saturated_z']
-
-                    # Slightly boost remaining axes when one is saturated
-                    boost = 1.0 + 0.2 * (sat_x + sat_y + sat_z)
-
-                    if sat_x:
-                        self.adcs_state['rws_rpm_y'] += 0.5 * desired_x * boost
-                        self.adcs_state['rws_rpm_z'] += 0.5 * desired_x * boost
-                    else:
-                        self.adcs_state['rws_rpm_x'] += desired_x
-
-                    if sat_y:
-                        self.adcs_state['rws_rpm_x'] += 0.5 * desired_y * boost
-                        self.adcs_state['rws_rpm_z'] += 0.5 * desired_y * boost
-                    else:
-                        self.adcs_state['rws_rpm_y'] += desired_y
-
-                    if sat_z:
-                        self.adcs_state['rws_rpm_x'] += 0.5 * desired_z * boost
-                        self.adcs_state['rws_rpm_y'] += 0.5 * desired_z * boost
-                    else:
-                        self.adcs_state['rws_rpm_z'] += desired_z
+                    
+                    # Compute desired torque in body axes
+                    torque_x = -self.adcs_state['roll_rate'] * control_gain if abs(self.adcs_state['roll_rate']) > rate_threshold else 0.0
+                    torque_y = -self.adcs_state['pitch_rate'] * control_gain if abs(self.adcs_state['pitch_rate']) > rate_threshold else 0.0
+                    torque_z = -self.adcs_state['yaw_rate'] * control_gain if abs(self.adcs_state['yaw_rate']) > rate_threshold else 0.0
+                    
+                    # Map body torques to wheel speeds using skewed configuration
+                    # Each wheel contributes to multiple axes based on its orientation
+                    # Wheel 1 (primarily X): 70.7% X, 50% Y, 50% Z
+                    # Wheel 2 (primarily Y): 50% X, 70.7% Y, 50% Z  
+                    # Wheel 3 (primarily Z): 50% X, 50% Y, 70.7% Z
+                    
+                    w1_contribution = 0.707 * torque_x + 0.500 * torque_y + 0.500 * torque_z
+                    w2_contribution = 0.500 * torque_x + 0.707 * torque_y + 0.500 * torque_z
+                    w3_contribution = 0.500 * torque_x + 0.500 * torque_y + 0.707 * torque_z
+                    
+                    # Check saturation and redistribute if needed
+                    sat_1 = self.adcs_state['rws_saturated_x']
+                    sat_2 = self.adcs_state['rws_saturated_y']
+                    sat_3 = self.adcs_state['rws_saturated_z']
+                    
+                    # If a wheel is saturated, redistribute its command to the other two
+                    if sat_1:
+                        w2_contribution += 0.5 * w1_contribution
+                        w3_contribution += 0.5 * w1_contribution
+                        w1_contribution = 0.0
+                    if sat_2:
+                        w1_contribution += 0.5 * w2_contribution
+                        w3_contribution += 0.5 * w2_contribution
+                        w2_contribution = 0.0
+                    if sat_3:
+                        w1_contribution += 0.5 * w3_contribution
+                        w2_contribution += 0.5 * w3_contribution
+                        w3_contribution = 0.0
+                    
+                    # Apply to wheels
+                    self.adcs_state['rws_rpm_x'] += w1_contribution
+                    self.adcs_state['rws_rpm_y'] += w2_contribution
+                    self.adcs_state['rws_rpm_z'] += w3_contribution
+                    
+                elif mode in ['SUN_POINT', 'NADIR', 'INERTIAL', 'FINE_HOLD']:
+                    # POINTING MODES: Wheels maintain attitude, compensate for disturbances
+                    control_gain = 10.0  # RPM per deg/s - allows 360° rotation without saturation
+                    
+                    # Only apply control if rates are significant (prevents drift accumulation)
+                    rate_threshold = 0.001  # deg/s
+                    
+                    # Compute desired torque in body axes
+                    torque_x = -self.adcs_state['roll_rate'] * control_gain if abs(self.adcs_state['roll_rate']) > rate_threshold else 0.0
+                    torque_y = -self.adcs_state['pitch_rate'] * control_gain if abs(self.adcs_state['pitch_rate']) > rate_threshold else 0.0
+                    torque_z = -self.adcs_state['yaw_rate'] * control_gain if abs(self.adcs_state['yaw_rate']) > rate_threshold else 0.0
+                    
+                    # Map body torques to wheel speeds using skewed configuration
+                    w1_contribution = 0.707 * torque_x + 0.500 * torque_y + 0.500 * torque_z
+                    w2_contribution = 0.500 * torque_x + 0.707 * torque_y + 0.500 * torque_z
+                    w3_contribution = 0.500 * torque_x + 0.500 * torque_y + 0.707 * torque_z
+                    
+                    # Check saturation and redistribute if needed
+                    sat_1 = self.adcs_state['rws_saturated_x']
+                    sat_2 = self.adcs_state['rws_saturated_y']
+                    sat_3 = self.adcs_state['rws_saturated_z']
+                    
+                    if sat_1:
+                        w2_contribution += 0.5 * w1_contribution
+                        w3_contribution += 0.5 * w1_contribution
+                        w1_contribution = 0.0
+                    if sat_2:
+                        w1_contribution += 0.5 * w2_contribution
+                        w3_contribution += 0.5 * w2_contribution
+                        w2_contribution = 0.0
+                    if sat_3:
+                        w1_contribution += 0.5 * w3_contribution
+                        w2_contribution += 0.5 * w3_contribution
+                        w3_contribution = 0.0
+                    
+                    # Apply to wheels
+                    self.adcs_state['rws_rpm_x'] += w1_contribution
+                    self.adcs_state['rws_rpm_y'] += w2_contribution
+                    self.adcs_state['rws_rpm_z'] += w3_contribution
                     
                     # Environmental perturbations (gravity gradient, solar pressure, drag)
                     # Much smaller to prevent unrealistic accumulation
@@ -1103,38 +1333,19 @@ class SpacecraftSimulator:
                 
                 # === AUTOMATIC REACTION WHEEL DESATURATION ===
                 # Spacecraft automatically manages wheel momentum using thrusters
-                # Thrust vector in +X direction, spacecraft slews to align thrust for desaturation
+                # Simplified: slew to fixed reasonable attitude then fire thrusters
                 desat_threshold = 4500.0  # Begin desaturation at 75% capacity
                 target_rpm = 500.0  # Target RPM after desaturation (nominal operating point)
                 desat_deadband = 100.0  # Deadband around target (stop when within ±100 RPM)
                 
-                # Calculate desaturation attitude based on momentum vector
-                # Angular momentum vector from reaction wheel speeds
-                h_x = self.adcs_state['rws_rpm_x']
-                h_y = self.adcs_state['rws_rpm_y']
-                h_z = self.adcs_state['rws_rpm_z']
+                # Fixed desaturation attitude - reasonable orientation for thruster firing
+                # Uses +X thruster, so point away from desired delta-V direction
+                # Simple fixed attitude works well enough for momentum dumping
+                desat_roll = 0.0
+                desat_pitch = 45.0  # 45° pitch up
+                desat_yaw = 0.0
                 
-                # Calculate magnitude of momentum vector
-                h_mag = (h_x**2 + h_y**2 + h_z**2)**0.5
-                
-                # Calculate desaturation attitude to point +X thrust axis OPPOSITE to momentum
-                # Thrusters fire to counter the momentum, so we need to point 180° away
-                # To point +X opposite to momentum vector [-h_x, -h_y, -h_z]:
-                if h_mag > 100.0:  # Avoid division by zero for very low momentum
-                    # Point opposite to momentum vector
-                    # Yaw angle: rotate around Z to point in -h direction in X-Y plane
-                    desat_yaw = math.degrees(math.atan2(-h_y, -h_x))
-                    # Pitch angle: rotate around Y to account for Z component
-                    desat_pitch = math.degrees(math.atan2(-h_z, math.sqrt(h_x**2 + h_y**2)))
-                    # Roll doesn't affect thrust direction for +X thruster
-                    desat_roll = 0.0
-                else:
-                    # Default attitude if momentum is very low
-                    desat_roll = 0.0
-                    desat_pitch = 0.0
-                    desat_yaw = 0.0
-                
-                attitude_tolerance = 5.0  # degrees - acceptable pointing error
+                attitude_tolerance = 10.0  # degrees - acceptable pointing error for thruster firing
                 
                 # Check if any axis exceeds threshold to START desaturation
                 needs_desat_start_x = abs(self.adcs_state['rws_rpm_x']) > desat_threshold
@@ -1207,21 +1418,35 @@ class SpacecraftSimulator:
                         # Phase 2: Fire thrusters for desaturation (only when in attitude)
                         if self.adcs_state['desat_attitude_reached']:
                             # Desaturation maneuver in progress
-                            # Single thruster pulse applies torque that reduces ALL wheels simultaneously
+                            # Thruster burn applies delta-V which:
+                            # 1. Creates torque (moment arm × thrust) to reduce wheel momentum
+                            # 2. Imparts linear momentum change affecting orbital velocity
+                            # 3. Consumes propellant mass
                             
-                            # Delta-V per thruster pulse (in m/s) - on order of mm/s
-                            delta_v_per_pulse = 0.002  # 2 mm/s per pulse
+                            # Thruster specifications (typical 1N monoprop thruster for 6U CubeSat)
+                            thrust_force = 1.0  # Newtons
+                            moment_arm = 0.15  # meters (thruster offset from CoM for 6U)
+                            burn_duration_per_cycle = 0.1  # seconds per simulation cycle
                             
-                            # Total momentum reduction per pulse (RPM reduced across all wheels)
-                            total_momentum_reduction = 50.0  # Total RPM reduction distributed across wheels
+                            # Calculate delta-V from thrust
+                            # dv = (F * dt) / m_total
+                            spacecraft_mass = 12.0 + self.prop_state['propellant_mass']  # kg (dry + wet)
+                            delta_v_per_cycle = (thrust_force * burn_duration_per_cycle) / spacecraft_mass  # m/s
                             
-                            # Calculate fuel consumption from delta-V using rocket equation
+                            # Calculate angular momentum change from thruster torque
+                            # Torque = moment_arm × thrust
+                            # Angular impulse = torque × dt
+                            # Convert to wheel RPM reduction (empirical scaling for CubeSat)
+                            torque = moment_arm * thrust_force  # N·m
+                            angular_impulse = torque * burn_duration_per_cycle  # N·m·s
+                            total_momentum_reduction = angular_impulse * 300.0  # Scaling factor: N·m·s to RPM
+                            
+                            # Calculate fuel consumption using rocket equation
                             # For small delta-V: dm ≈ (m_total * dv) / (Isp * g0)
-                            # Hydrazine Isp ≈ 220s, g0 = 9.81 m/s²
-                            spacecraft_mass = 12.0  # kg (6U CubeSat typical dry mass + propellant)
-                            isp = 220.0  # seconds (N2H4 monoprop typical)
+                            # Hydrazine: Isp ≈ 220s, g0 = 9.81 m/s²
+                            isp = 220.0  # seconds (N2H4 monoprop)
                             g0 = 9.81  # m/s²
-                            fuel_per_pulse = (spacecraft_mass * delta_v_per_pulse) / (isp * g0)
+                            fuel_per_cycle = (spacecraft_mass * delta_v_per_cycle) / (isp * g0)  # kg
                             
                             valve_needed = False
                             total_delta_v_this_cycle = 0.0
@@ -1230,13 +1455,26 @@ class SpacecraftSimulator:
                             any_outside_deadband = outside_deadband_x or outside_deadband_y or outside_deadband_z
                             
                             if any_outside_deadband and self.prop_state['propellant_mass'] > 0.0:
-                                # Fire single thruster pulse
+                                # FIRE THRUSTERS - Desaturation burn in progress
                                 valve_needed = True
                                 
-                                # Apply fuel consumption for single pulse
-                                self.prop_state['propellant_mass'] -= fuel_per_pulse
-                                self.prop_state['total_delta_v'] += delta_v_per_pulse
-                                total_delta_v_this_cycle += delta_v_per_pulse
+                                # Apply fuel consumption for thruster burn
+                                fuel_before = self.prop_state['propellant_mass']
+                                self.prop_state['propellant_mass'] -= fuel_per_cycle
+                                self.prop_state['propellant_mass'] = max(0.0, self.prop_state['propellant_mass'])  # Can't go negative
+                                fuel_consumed = fuel_before - self.prop_state['propellant_mass']
+                                
+                                # Accumulate total delta-V for mission tracking
+                                self.prop_state['total_delta_v'] += delta_v_per_cycle
+                                total_delta_v_this_cycle += delta_v_per_cycle
+                                
+                                # Log thruster firing event (throttle to avoid spam)
+                                if not hasattr(self, '_last_thruster_evr_time'):
+                                    self._last_thruster_evr_time = 0.0
+                                if elapsed_time - self._last_thruster_evr_time > 5.0:  # EVR every 5 seconds
+                                    self.add_evr(f"THRUSTERS FIRING: Desaturation burn (ΔV={delta_v_per_cycle*1000:.1f} mm/s, fuel={fuel_consumed*1000:.2f}g)")
+                                    self.add_evr(f"Momentum reduction: {total_momentum_reduction:.0f} RPM, Remaining fuel: {self.prop_state['propellant_mass']*1000:.1f}g")
+                                    self._last_thruster_evr_time = elapsed_time
                                 
                                 # Reduce momentum across ALL wheels proportionally
                                 # The thruster firing opposite to the total momentum vector
@@ -1262,9 +1500,24 @@ class SpacecraftSimulator:
                                         self.adcs_state['rws_rpm_z'] -= total_momentum_reduction * h_z_frac
                                     else:
                                         self.adcs_state['rws_rpm_z'] += total_momentum_reduction * h_z_frac
+                                
+                                # After thruster firing, reset to slewing state for next increment
+                                # This allows the spacecraft to recalculate target based on new momentum
+                                self.adcs_state['desat_slewing'] = True
+                                self.adcs_state['desat_attitude_reached'] = False
+                                # Note: New target will be recalculated at top of loop on next cycle
                             
                             # Apply delta-V to orbital parameters
+                            # Thruster firing changes spacecraft velocity, affecting orbit
+                            # Direction depends on spacecraft attitude and thruster orientation
                             if total_delta_v_this_cycle > 0:
+                                # Log orbital mechanics impact (throttled)
+                                if not hasattr(self, '_last_orbit_evr_time'):
+                                    self._last_orbit_evr_time = 0.0
+                                if elapsed_time - self._last_orbit_evr_time > 10.0:  # EVR every 10 seconds
+                                    self.add_evr(f"Desaturation affecting orbit: ΔV={self.prop_state['total_delta_v']*1000:.2f} mm/s cumulative")
+                                    self._last_orbit_evr_time = elapsed_time
+                                
                                 self._apply_delta_v_to_orbit(
                                     total_delta_v_this_cycle,
                                     {
@@ -1351,6 +1604,23 @@ class SpacecraftSimulator:
                 self.adcs_state['rws_momentum_x'] = wheel_inertia * (self.adcs_state['rws_rpm_x'] * 2 * math.pi / 60.0)
                 self.adcs_state['rws_momentum_y'] = wheel_inertia * (self.adcs_state['rws_rpm_y'] * 2 * math.pi / 60.0)
                 self.adcs_state['rws_momentum_z'] = wheel_inertia * (self.adcs_state['rws_rpm_z'] * 2 * math.pi / 60.0)
+            
+            # COMPOUND ANOMALY: PROP valve stuck open - continuous propellant leak
+            if self.anomaly_states['prop_valve_stuck_open'] and self.prop_state['system_enabled']:
+                # Uncontrolled propellant venting
+                leak_rate = 0.01  # kg per cycle (much faster than normal burn)
+                self.prop_state['propellant_mass'] -= leak_rate
+                self.prop_state['propellant_mass'] = max(0.0, self.prop_state['propellant_mass'])
+                
+                # Uncontrolled thrust creates deltaV
+                thrust_force = 1.0  # N
+                spacecraft_mass = 12.0 + self.prop_state['propellant_mass']
+                burn_duration = 0.1  # seconds
+                delta_v = (thrust_force * burn_duration) / spacecraft_mass
+                self.prop_state['total_delta_v'] += delta_v
+                
+                # Force valve to OPEN state
+                self.prop_state['valve_open'] = True
                 
     def _update_tcs(self, elapsed_time):
         """Update Thermal Control System"""
@@ -1366,6 +1636,12 @@ class SpacecraftSimulator:
             
             # Update voltage and current based on heater usage
             # Each heater draws ~5W = ~0.42A at 12V
+            # COMPOUND ANOMALY: TCS heaters stuck ON - force all heaters ON
+            if self.anomaly_states['tcs_heaters_stuck_on']:
+                self.tcs_state['heater_avi_on'] = True
+                self.tcs_state['heater_eps_on'] = True
+                self.tcs_state['heater_prop_on'] = True
+                
             num_heaters_on = sum([
                 self.tcs_state['heater_avi_on'],
                 self.tcs_state['heater_eps_on'],
@@ -1668,6 +1944,15 @@ class SpacecraftSimulator:
         """
         Execute automatic safe mode sequence when critical anomaly detected
         Safe mode is designed to protect spacecraft and wait for ground intervention
+        
+        Safe Mode Actions:
+        1. Shutdown all PROP systems
+        2. Turn off heaters that are not normally on (keep critical heaters based on temperature)
+        3. Deploy solar arrays A and B
+        4. Deploy radiator
+        5. Set ADCS to SUN_POINT (if not faulted)
+        6. Enable cross-charge
+        7. Cycle COMM: RX 60s → TX 60s → TX_RX 30s (repeating)
         """
         with self.lock:
             self.add_evr("=== ENTERING SAFE MODE ===")
@@ -1676,34 +1961,67 @@ class SpacecraftSimulator:
             self.eps_state['mode'] = 'SAFE'
             self.operational_mode = 'SAFE'
             
-            # Keep ADCS enabled unless ADCS itself is faulted
+            # 1. Shutdown all PROP systems
+            self.prop_state['standby_mode'] = False
+            self.prop_state['system_enabled'] = False
+            self.prop_state['valve_open'] = False
+            self.prop_state['catalyst_heater_on'] = False
+            self.prop_state['catalyst_ready'] = False
+            self.add_evr("SAFE MODE: PROP completely shutdown (standby, main power, heater off)")
+            
+            # 2. Turn off heaters that are not normally on (only turn off if temps safe)
+            # Keep heaters ON if temperatures are dangerously low
+            if self.tcs_state['temp_avi'] > 5.0:
+                self.tcs_state['heater_avi_on'] = False
+                self.add_evr("SAFE MODE: AVI heater off (temp safe)")
+            else:
+                self.add_evr("SAFE MODE: AVI heater kept on (temp critical)")
+                
+            if self.tcs_state['temp_eps'] > 0.0:
+                self.tcs_state['heater_eps_on'] = False
+                self.add_evr("SAFE MODE: EPS heater off (temp safe)")
+            else:
+                self.add_evr("SAFE MODE: EPS heater kept on (temp critical)")
+                
+            # PROP heater always off in safe mode (PROP is off)
+            self.tcs_state['heater_prop_on'] = False
+            self.add_evr("SAFE MODE: PROP heater off")
+            
+            # 3. Deploy solar arrays if not already deployed
+            if not self.eps_state['solar_array_a_deployed']:
+                self.eps_state['solar_array_a_deploying'] = True
+                self.eps_state['solar_array_a_deploy_time'] = 0.0
+                self.add_evr("SAFE MODE: Deploying Solar Array A")
+            
+            if not self.eps_state['solar_array_b_deployed']:
+                self.eps_state['solar_array_b_deploying'] = True
+                self.eps_state['solar_array_b_deploy_time'] = 0.0
+                self.add_evr("SAFE MODE: Deploying Solar Array B")
+            
+            # 4. Deploy radiator if not already deployed
+            if not self.tcs_state['radiator_deployed']:
+                self.tcs_state['radiator_deploying'] = True
+                self.tcs_state['radiator_deploy_time'] = 0.0
+                self.add_evr("SAFE MODE: Deploying radiator")
+            
+            # 5. Set ADCS to SUN_POINT (unless ADCS is faulted)
             if self.adcs_state['faulted']:
                 self.adcs_state['enabled'] = False
                 self.add_evr("SAFE MODE: ADCS disabled (FAULTED)")
             else:
                 self.adcs_state['enabled'] = True
-                self.adcs_state['mode'] = 'DETUMBLE'
-                self.add_evr("SAFE MODE: ADCS enabled in DETUMBLE")
+                self.adcs_state['mode'] = 'SUN_POINT'
+                self.add_evr("SAFE MODE: ADCS enabled in SUN_POINT mode (maximize power)")
             
-            # NOTE: Reaction wheels maintain their current RPM in safe mode
-            # They are NOT spun down - this preserves angular momentum state
+            # 6. Enable cross-charge for redundancy
+            self.eps_state['cross_charging_enabled'] = True
+            self.add_evr("SAFE MODE: Cross-charging ENABLED (redundant power path)")
             
-            # Initialize safe mode comm cycling (RX → TX → TX_RX)
+            # 7. Initialize safe mode COMM cycling (RX 60s → TX 60s → TX_RX 30s)
             self.comm_state['mode'] = 'RX'  # Start with RX
             self.safe_mode_comm_timer = 0.0
-            self.safe_mode_comm_phase = 0
-            self.add_evr("SAFE MODE: COMM cycling initiated (60s RX → 60s TX → 30s TX_RX)")
-            
-            # Disable PROP to prevent uncommanded maneuvers
-            self.prop_state['standby_mode'] = False
-            self.prop_state['system_enabled'] = False
-            self.prop_state['valve_open'] = False
-            self.prop_state['catalyst_heater_on'] = False
-            self.add_evr("SAFE MODE: PROP disabled (standby and main power off)")
-            
-            # Point solar panels to sun (if possible without ADCS)
-            # In real system, this might use magnetic torquers or wait for passive stability
-            self.add_evr("SAFE MODE: Attempting sun acquisition for power")
+            self.safe_mode_comm_phase = 0  # 0=RX, 1=TX, 2=TX_RX
+            self.add_evr("SAFE MODE: COMM cycling initiated (60s RX → 60s TX → 30s TX_RX, repeating)")
             
             # Reset error counters
             self.cdh_state['error_count'] = 0
@@ -2161,10 +2479,27 @@ class SpacecraftSimulator:
                 return
                 
             command = self.command_queue.pop(0)
-            self._execute_command(command)
+            success = self._execute_command(command)
+            # Store last command result for GUI to check
+            self.last_command_success = success
+            self.last_command = command
             
     def _execute_command(self, command):
-        """Execute a spacecraft command"""
+        """Execute a spacecraft command - returns True if accepted, False if rejected"""
+        # EXPERIMENTAL FAULT: CDH or AVI faulted - reject ALL commands except power cycle
+        if self.experimental_fault_active and self.experimental_fault_type in ['CDH', 'AVI']:
+            if command not in ['CDH_POWER_CYCLE', 'AVI_POWER_CYCLE']:
+                self.add_evr(f"COMMAND REJECTED - {self.experimental_fault_type} FAULTED: {command} (power cycle required)")
+                return False
+        
+        # EXPERIMENTAL FAULT: TTC faulted - track commands sent without telemetry
+        if self.experimental_fault_active and self.experimental_fault_type == 'TTC':
+            # Check if the command is for a subsystem whose telemetry is stale
+            command_prefix = command.split('_')[0]  # Get subsystem prefix (ADCS, EPS, COMM, etc.)
+            if command_prefix.lower() in self.experimental_fault_stale_subsystems:
+                self.commanding_without_telemetry_count += 1
+                self.add_evr(f"WARNING: Commanding {command_prefix} without telemetry (count: {self.commanding_without_telemetry_count})")
+        
         self.command_counter += 1
         self.cdh_state['cmd_count'] += 1
         self.add_evr(f"Executing command: {command}")
@@ -2259,27 +2594,44 @@ class SpacecraftSimulator:
             else:
                 self.add_evr("ERROR: ADCS_FINE_HOLD format: ADCS_FINE_HOLD <roll> <pitch> <yaw>")
         elif command == "ADCS_RESET":
+            # Reset attitude and rates to zero (calibration/initialization)
             self.adcs_state['roll'] = 0.0
             self.adcs_state['pitch'] = 0.0
             self.adcs_state['yaw'] = 0.0
             self.adcs_state['roll_rate'] = 0.0
             self.adcs_state['pitch_rate'] = 0.0
             self.adcs_state['yaw_rate'] = 0.0
+            self.add_evr("ADCS attitude and rates reset to zero")
         elif command == "ADCS_POWER_CYCLE":
-            # Power cycle ADCS subsystem - clears fault flag
+            # Power cycle ADCS subsystem - clears fault flag and resets all state
             self.adcs_state['enabled'] = False
             self.adcs_state['faulted'] = False
             self.adcs_state['mode'] = 'DETUMBLE'
             self.adcs_state['rws_rpm_x'] = 0.0
             self.adcs_state['rws_rpm_y'] = 0.0
             self.adcs_state['rws_rpm_z'] = 0.0
+            self.adcs_state['rws_momentum_x'] = 0.0
+            self.adcs_state['rws_momentum_y'] = 0.0
+            self.adcs_state['rws_momentum_z'] = 0.0
+            self.adcs_state['rws_saturated_x'] = False
+            self.adcs_state['rws_saturated_y'] = False
+            self.adcs_state['rws_saturated_z'] = False
+            self.adcs_state['rws_desaturation_active'] = False
+            self.adcs_state['desat_slewing'] = False
+            self.adcs_state['desat_attitude_reached'] = False
             self.adcs_state['control_lost'] = False
+            self.adcs_state['voltage'] = 0.0
+            self.adcs_state['current'] = 0.0
+            # Clear compound anomaly tumble rates
+            self.adcs_state['roll_rate'] = 0.0
+            self.adcs_state['pitch_rate'] = 0.0
+            self.adcs_state['yaw_rate'] = 0.0
             self.add_evr("ADCS power cycled - fault cleared, system disabled")
         elif command == "ADCS_DESAT":
             # Manual desaturation command - triggers auto-desat sequence
             # This command initiates the same desaturation sequence as auto-desat:
             # 1. Slews to desaturation attitude based on momentum vector
-            # 2. Fires thrusters to reduce wheel speeds to 1000 RPM
+            # 2. Fires thrusters to reduce wheel speeds to 500 RPM
             if not self.adcs_state['enabled']:
                 self.add_evr("ADCS desaturation failed - ADCS not enabled")
             elif self.adcs_state['faulted']:
@@ -2310,7 +2662,7 @@ class SpacecraftSimulator:
                     if needs_desat_y: axes_desat.append('Y')
                     if needs_desat_z: axes_desat.append('Z')
                     self.add_evr(f"Manual RWS desaturation initiated - axes: {', '.join(axes_desat)}")
-                    self.add_evr("Target: 1000 RPM ± 100 RPM")
+                    self.add_evr("Target: 500 RPM ± 100 RPM")
         elif command == "ADCS_RWS_DESAT":
             # Manual reaction wheel desaturation command
             # User must have PROP enabled AND catalyst ready for this to work
@@ -2347,16 +2699,33 @@ class SpacecraftSimulator:
             self.eps_state['mode'] = 'SCIENCE'
             self.operational_mode = 'SCIENCE'
         elif command == "EPS_RESET":
+            # Reset EPS battery parameters to nominal values
             self.eps_state['battery_a_voltage'] = 11.8
             self.eps_state['battery_a_soc'] = 85.0
+            self.eps_state['battery_a_current'] = 0.0
+            self.eps_state['battery_a_temp'] = 15.0
             self.eps_state['battery_b_voltage'] = 11.8
             self.eps_state['battery_b_soc'] = 85.0
+            self.eps_state['battery_b_current'] = 0.0
+            self.eps_state['battery_b_temp'] = 15.0
+            self.eps_state['bus_voltage'] = 11.8
             self.anomaly_states['battery_low'] = False
+            self.add_evr("EPS reset - batteries restored to 85% SOC, 11.8V")
         elif command == "EPS_POWER_CYCLE":
-            # Power cycle EPS subsystem - clears fault flag
+            # Power cycle EPS subsystem - clears fault flag and compound anomalies
             self.eps_state['faulted'] = False
             self.eps_state['mode'] = 'NOMINAL'
-            self.add_evr("EPS power cycled - fault cleared")
+            # Clear compound anomaly flags
+            self.anomaly_states['battery_a_drain'] = False
+            self.anomaly_states['battery_b_drain'] = False
+            self.anomaly_states['solar_array_a_fault'] = False
+            self.anomaly_states['solar_array_b_fault'] = False
+            # Reset array status if faulted
+            if self.eps_state['solar_array_a_status'] == 'FAULTED':
+                self.eps_state['solar_array_a_status'] = 'NOMINAL'
+            if self.eps_state['solar_array_b_status'] == 'FAULTED':
+                self.eps_state['solar_array_b_status'] = 'NOMINAL'
+            self.add_evr("EPS power cycled - fault cleared, compound anomalies cleared")
         elif command == "EPS_DEPLOY_ARRAY_A":
             if self.eps_state['solar_array_a_deployed']:
                 self.add_evr("EPS: Solar Array A already deployed")
@@ -2413,10 +2782,10 @@ class SpacecraftSimulator:
                 self.add_evr("TCS: Radiator stowing started (10s)")
         elif command == "EPS_CROSS_CHARGE_ENABLE":
             self.eps_state['cross_charging_enabled'] = True
-            self.add_evr("EPS: Cross-charging enabled")
+            self.add_evr("EPS: Cross-charging enabled - Solar A/B can charge Battery A/B (redundant power path)")
         elif command == "EPS_CROSS_CHARGE_DISABLE":
             self.eps_state['cross_charging_enabled'] = False
-            self.add_evr("EPS: Cross-charging disabled")
+            self.add_evr("EPS: Cross-charging disabled - Solar A charges Battery A, Solar B charges Battery B")
             
         # COMM commands (order matters - check TX_RX before TX!)
         elif command == "COMM_TX_RX":
@@ -2441,24 +2810,22 @@ class SpacecraftSimulator:
                 self.add_evr("COMM_TX rejected - COMM faulted (power cycle required)")
             else:
                 # COMM_TX [timeout_seconds]
-                # Example: COMM_TX 300 (TX for 5 minutes then return to RX)
-                # If no timeout, TX mode is indefinite until manual change or safe mode
+                # Example: COMM_TX 60 (TX for 60 seconds then return to RX)
+                # Timeout is REQUIRED for safety
                 parts = command.split()
-            if len(parts) == 2:
-                try:
-                    timeout = float(parts[1])
-                    self.comm_state['tx_timeout'] = timeout
-                    self.comm_state['tx_time_remaining'] = timeout
-                    self.add_evr(f"COMM: TX mode enabled for {timeout:.0f} seconds")
-                except ValueError:
-                    self.add_evr("ERROR: COMM_TX timeout must be numeric")
+                if len(parts) == 2:
+                    try:
+                        timeout = float(parts[1])
+                        self.comm_state['tx_timeout'] = timeout
+                        self.comm_state['tx_time_remaining'] = timeout
+                        self.comm_state['mode'] = 'TX'
+                        self.add_evr(f"COMM: TX mode enabled for {timeout:.0f} seconds (will auto-revert to RX)")
+                    except ValueError:
+                        self.add_evr("ERROR: COMM_TX timeout must be numeric. Usage: COMM_TX <seconds>")
+                        return
+                else:
+                    self.add_evr("ERROR: COMM_TX requires timeout parameter. Usage: COMM_TX <seconds>")
                     return
-            else:
-                self.comm_state['tx_timeout'] = 0.0  # Indefinite
-                self.comm_state['tx_time_remaining'] = 0.0
-                self.add_evr("COMM: TX mode enabled (indefinite - spacecraft NOT commandable)")
-            
-            self.comm_state['mode'] = 'TX'
             
         elif command == "COMM_RX":
             if self.comm_state['faulted']:
@@ -2483,16 +2850,27 @@ class SpacecraftSimulator:
         elif command == "COMM_POWER_20":
             self.comm_state['tx_power'] = 20.0
         elif command == "COMM_RESET":
+            # Reset COMM parameters to default values
             self.comm_state['mode'] = 'RX'  # Reset to RX mode (default)
             self.comm_state['tx_power'] = 30.0
             self.comm_state['temp'] = 30.0
+            self.comm_state['packets_tx'] = 0
+            self.comm_state['packets_rx'] = 0
+            self.comm_state['tx_time_remaining'] = 0.0
             self.anomaly_states['comm_overtemp'] = False
+            self.add_evr("COMM reset - mode RX, power 30W, temp reset")
         elif command == "COMM_POWER_CYCLE":
-            # Power cycle COMM subsystem - clears fault flag
+            # Power cycle COMM subsystem - clears fault flag and resets all state
             self.comm_state['faulted'] = False
             self.comm_state['mode'] = 'RX'
             self.comm_state['tx_power'] = 30.0
             self.comm_state['temp'] = 30.0
+            self.add_evr("COMM power cycled - fault cleared, mode RX")
+            self.comm_state['packets_tx'] = 0
+            self.comm_state['packets_rx'] = 0
+            self.comm_state['tx_time_remaining'] = 0.0
+            self.comm_state['voltage'] = 12.0
+            self.comm_state['current'] = 0.42  # RX mode current
             self.anomaly_states['comm_overtemp'] = False
             self.add_evr("COMM power cycled - fault cleared")
             
@@ -2527,12 +2905,21 @@ class SpacecraftSimulator:
             self.prop_state['catalyst_heater_on'] = False
             self.add_evr("PROP: Catalyst heater OFF")
         elif command == "PROP_POWER_CYCLE":
-            # Power cycle PROP subsystem - clears fault flag
+            # Power cycle PROP subsystem - clears fault flag and resets all state
             self.prop_state['faulted'] = False
             self.prop_state['standby_mode'] = False
             self.prop_state['system_enabled'] = False
             self.prop_state['valve_open'] = False
             self.prop_state['catalyst_heater_on'] = False
+            self.prop_state['catalyst_ready'] = False
+            self.prop_state['catalyst_temp'] = 20.0  # Reset to ambient
+            self.prop_state['voltage_5v'] = 0.0
+            self.prop_state['current_5v'] = 0.0
+            self.prop_state['voltage_vbat'] = 0.0
+            self.prop_state['current_vbat'] = 0.0
+            self.prop_state['desat_valve_auto'] = False
+            # Clear compound anomaly flag
+            self.anomaly_states['prop_valve_stuck_open'] = False
             self.add_evr("PROP power cycled - fault cleared, all systems disabled")
         elif command == "PROP_VALVE_OPEN":
             if not self.prop_state['system_enabled']:
@@ -2543,52 +2930,98 @@ class SpacecraftSimulator:
                 self.prop_state['valve_open'] = True
                 self.add_evr("PROP: Valve opened - thrust enabled")
         elif command == "PROP_VALVE_CLOSE":
-            self.prop_state['valve_open'] = False
-            self.add_evr("PROP: Valve closed")
+            # COMPOUND ANOMALY: Valve stuck open - command ignored until power cycle
+            if self.anomaly_states['prop_valve_stuck_open']:
+                self.add_evr("PROP_VALVE_CLOSE rejected - valve mechanically stuck OPEN (power cycle required)")
+            else:
+                self.prop_state['valve_open'] = False
+                self.add_evr("PROP: Valve closed")
             
         # TCS commands
         elif command == "TCS_HEATER_AVI_ON":
             self.tcs_state['heater_avi_on'] = True
         elif command == "TCS_HEATER_AVI_OFF":
-            self.tcs_state['heater_avi_on'] = False
+            # COMPOUND ANOMALY: Heaters stuck ON - command ignored until power cycle
+            if self.anomaly_states['tcs_heaters_stuck_on']:
+                self.add_evr("TCS_HEATER_AVI_OFF rejected - heaters stuck ON (power cycle required)")
+            else:
+                self.tcs_state['heater_avi_on'] = False
         elif command == "TCS_HEATER_EPS_ON":
             self.tcs_state['heater_eps_on'] = True
         elif command == "TCS_HEATER_EPS_OFF":
-            self.tcs_state['heater_eps_on'] = False
+            # COMPOUND ANOMALY: Heaters stuck ON - command ignored until power cycle
+            if self.anomaly_states['tcs_heaters_stuck_on']:
+                self.add_evr("TCS_HEATER_EPS_OFF rejected - heaters stuck ON (power cycle required)")
+            else:
+                self.tcs_state['heater_eps_on'] = False
         elif command == "TCS_HEATER_PROP_ON":
             self.tcs_state['heater_prop_on'] = True
         elif command == "TCS_HEATER_PROP_OFF":
-            self.tcs_state['heater_prop_on'] = False
+            # COMPOUND ANOMALY: Heaters stuck ON - command ignored until power cycle
+            if self.anomaly_states['tcs_heaters_stuck_on']:
+                self.add_evr("TCS_HEATER_PROP_OFF rejected - heaters stuck ON (power cycle required)")
+            else:
+                self.tcs_state['heater_prop_on'] = False
         elif command == "TCS_POWER_CYCLE":
-            # Power cycle TCS subsystem - clears fault flag
+            # Power cycle TCS subsystem - clears fault flag and resets all state
             self.tcs_state['faulted'] = False
             self.tcs_state['heater_avi_on'] = False
             self.tcs_state['heater_eps_on'] = False
             self.tcs_state['heater_prop_on'] = False
+            self.tcs_state['voltage'] = 12.0
+            self.tcs_state['current'] = 0.0
+            # Clear compound anomaly flag
+            self.anomaly_states['tcs_heaters_stuck_on'] = False
             self.add_evr("TCS power cycled - fault cleared, all heaters off")
             
         # AVI commands
         elif command == "AVI_REBOOT":
+            # Soft reboot - increment boot count and reset loads
             self.avi_state['boot_count'] += 1
             self.avi_state['cpu_load'] = 30.0
             self.avi_state['memory_usage'] = 40.0
+            self.avi_state['uptime'] = 0.0
+            self.add_evr("AVI rebooted - boot count incremented")
         elif command == "AVI_POWER_CYCLE":
+            # Full power cycle - reset all AVI state
             self.avi_state['boot_count'] += 1
             self.avi_state['uptime'] = 0.0
+            self.avi_state['cpu_load'] = 30.0
+            self.avi_state['memory_usage'] = 40.0
+            self.avi_state['cpu_temp'] = 25.0
+            self.avi_state['voltage'] = 12.0
+            self.avi_state['current'] = 1.25
+            self.avi_state['faulted'] = False  # Clear AVI fault flag
+            self.anomaly_states['avi_overtemp'] = False
             self.epoch_time = time.time()
+            self.clear_experimental_fault()  # Clear experimental fault if active
+            self.add_evr("AVI power cycled - all parameters reset")
         
         # CDH commands
         elif command == "CDH_POWER_CYCLE":
-            # Power cycle CDH subsystem - clears fault flag
+            # Power cycle CDH subsystem - clears fault flag and resets counters
             self.cdh_state['faulted'] = False
             self.cdh_state['error_count'] = 0
+            self.cdh_state['cmd_count'] = 0
+            self.cdh_state['tlm_count'] = 0
+            self.cdh_state['voltage'] = 12.0
+            self.cdh_state['current'] = 0.25
+            self.anomaly_states['storage_full'] = False
+            self.clear_experimental_fault()  # Clear experimental fault if active
             self.add_evr("CDH power cycled - fault cleared")
         
         # TTC commands
         elif command == "TTC_POWER_CYCLE":
-            # Power cycle TTC subsystem - clears fault flag
+            # Power cycle TTC subsystem - clears fault flag and resets all state
             self.ttc_state['faulted'] = False
             self.ttc_state['link_status'] = 'NO_LINK'
+            self.ttc_state['signal_strength'] = -105.0
+            self.ttc_state['uplink_rate'] = 0.0
+            self.ttc_state['downlink_rate'] = 0.0
+            self.ttc_state['pass_elevation'] = 0.0
+            self.ttc_state['doppler_shift'] = 0.0
+            self.ttc_state['voltage'] = 12.0
+            self.ttc_state['current'] = 0.17
             self.add_evr("TTC power cycled - fault cleared")
             
         # Star Tracker commands
@@ -2603,6 +3036,7 @@ class SpacecraftSimulator:
             self.star_tracker_state['enabled'] = False
             self.add_evr("Star Tracker disabled")
         elif command == "STAR_TRACKER_POWER_CYCLE":
+            # Power cycle Star Tracker - clear fault and reset all state
             self.star_tracker_state['faulted'] = False
             self.star_tracker_state['enabled'] = False
             self.star_tracker_state['num_stars_tracked'] = 0
@@ -2612,6 +3046,8 @@ class SpacecraftSimulator:
             self.star_tracker_state['roll'] = 0.0
             self.star_tracker_state['pitch'] = 0.0
             self.star_tracker_state['yaw'] = 0.0
+            self.star_tracker_state['voltage'] = 0.0
+            self.star_tracker_state['current'] = 0.0
             self.add_evr("Star Tracker power cycled - fault cleared")
             
         # GPS commands
@@ -2626,11 +3062,14 @@ class SpacecraftSimulator:
             self.gps_state['enabled'] = False
             self.add_evr("GPS disabled")
         elif command == "GPS_POWER_CYCLE":
+            # Power cycle GPS - clear fault and reset all state
             self.gps_state['faulted'] = False
             self.gps_state['enabled'] = False
             self.gps_state['num_satellites'] = 0
             self.gps_state['position_valid'] = False
             self.gps_state['time_to_first_fix'] = 0.0
+            self.gps_state['voltage'] = 0.0
+            self.gps_state['current'] = 0.0
             self.add_evr("GPS power cycled - fault cleared")
             
         # System commands
@@ -2644,6 +3083,55 @@ class SpacecraftSimulator:
             self.add_evr("Fault injection DISABLED")
         elif command == "SAFE_MODE":
             self._enter_safe_mode()
+        
+        # ===== COMPOUND ANOMALY INJECTION COMMANDS (OFF-NOMINAL SCENARIO) =====
+        elif command == "INJECT_COMPOUND_ADCS_FAULT":
+            # ADCS faults during maneuver - spacecraft tumbles, telemetry stale except fault flag
+            self.adcs_state['faulted'] = True
+            self.adcs_state['enabled'] = False
+            # Set high tumble rates
+            self.adcs_state['roll_rate'] = random.uniform(5.0, 10.0)
+            self.adcs_state['pitch_rate'] = random.uniform(5.0, 10.0)
+            self.adcs_state['yaw_rate'] = random.uniform(5.0, 10.0)
+            self.add_evr("COMPOUND ANOMALY: ADCS FAULT during maneuver - spacecraft tumbling")
+        
+        elif command == "INJECT_COMPOUND_BATTERY_DRAIN":
+            # Random battery starts draining despite working solar arrays
+            drain_battery = random.choice(['A', 'B'])
+            self.anomaly_states[f'battery_{drain_battery.lower()}_drain'] = True
+            self.add_evr(f"COMPOUND ANOMALY: Battery {drain_battery} draining despite solar arrays working")
+        
+        elif command == "INJECT_COMPOUND_SOLAR_FAULT":
+            # Random solar array faults
+            fault_array = random.choice(['A', 'B'])
+            if fault_array == 'A':
+                self.eps_state['solar_array_a_deployed'] = 'FAULTED'
+                self.anomaly_states['solar_array_a_fault'] = True
+            else:
+                self.eps_state['solar_array_b_deployed'] = 'FAULTED'
+                self.anomaly_states['solar_array_b_fault'] = True
+            self.add_evr(f"COMPOUND ANOMALY: Solar Array {fault_array} FAULTED")
+        
+        elif command == "INJECT_COMPOUND_COMM_FAULT":
+            # COMM faults - all telemetry goes stale, returns to RX mode
+            self.comm_state['faulted'] = True
+            self.comm_state['mode'] = 'RX'
+            self.comm_state['link_status'] = 'NO_LINK'
+            self.add_evr("COMPOUND ANOMALY: COMM FAULT - all telemetry stale, RX mode only")
+        
+        elif command == "INJECT_COMPOUND_PROP_FAULT":
+            # PROP faults during maneuver - valve stuck open, propellant leaking
+            self.prop_state['faulted'] = True
+            self.prop_state['valve_status'] = 'OPEN'
+            self.anomaly_states['prop_valve_stuck_open'] = True
+            self.add_evr("COMPOUND ANOMALY: PROP FAULT - valve stuck OPEN, propellant leaking")
+        
+        elif command == "INJECT_COMPOUND_TCS_FAULT":
+            # TCS faults - all heaters stuck ON
+            self.tcs_state['faulted'] = True
+            self.anomaly_states['tcs_heaters_stuck_on'] = True
+            self.add_evr("COMPOUND ANOMALY: TCS FAULT - all heaters stuck ON")
+        
         elif command == "EXIT_SAFE_MODE":
             # Exit safe mode - restore to nominal operations
             if self.eps_state['mode'] == 'SAFE':
@@ -2658,6 +3146,13 @@ class SpacecraftSimulator:
         elif command == "SYS_RESET":
             self.__init__()
             self.add_evr("System reset complete")
+        else:
+            # Unknown command
+            self.add_evr(f"COMMAND REJECTED: Unknown command '{command}'")
+            return False
+        
+        # Command accepted and executed
+        return True
                 
     def add_evr(self, message):
         """Add event record - only transmitted to ground when in TX_RX mode"""
@@ -2675,15 +3170,16 @@ class SpacecraftSimulator:
         # Silent otherwise - EVR stored but not downlinked
                 
     def send_command(self, command):
-        """Queue a command for execution"""
+        """Queue a command for execution - returns True if queued, False if rejected"""
         with self.lock:
             # Block commands if in TX-only mode (spacecraft cannot receive)
             if self.comm_state['mode'] == 'TX' and self.operational_mode != 'SAFE':
                 self.add_evr(f"Command REJECTED: {command} - spacecraft in TX-only mode (not commandable)")
-                return
+                return False
             
             self.command_queue.append(command)
             self.add_evr(f"Command queued: {command}")
+            return True
             
     def get_evr_log(self):
         """Get EVR log"""
@@ -2724,6 +3220,40 @@ class SpacecraftSimulator:
                 'comm': self.comm_state.copy()
             }
             
+            # EXPERIMENTAL FAULT: Apply stale telemetry based on fault type
+            if self.experimental_fault_active:
+                for subsystem in self.experimental_fault_stale_subsystems:
+                    if subsystem in current_telemetry:
+                        # Special case: For TTC fault, never make the TTC fault flag stale
+                        if self.experimental_fault_type == 'TTC' and subsystem == 'ttc':
+                            # Keep TTC fault flag visible, make everything else stale
+                            temp_dict = current_telemetry['ttc'].copy()
+                            fault_flag = temp_dict.get('faulted', False)
+                            current_telemetry['ttc'] = make_stale(temp_dict)
+                            current_telemetry['ttc']['faulted'] = fault_flag
+                        else:
+                            current_telemetry[subsystem] = make_stale(current_telemetry[subsystem])
+            
+            # COMPOUND ANOMALY: Apply stale telemetry based on compound fault types
+            # ADCS compound fault - all ADCS telemetry stale except 'faulted' flag
+            if self.adcs_state.get('faulted', False):
+                temp_dict = current_telemetry['adcs'].copy()
+                fault_flag = temp_dict.get('faulted', False)
+                current_telemetry['adcs'] = make_stale(temp_dict)
+                current_telemetry['adcs']['faulted'] = fault_flag
+            
+            # PROP compound fault - all PROP telemetry stale except 'faulted' flag
+            if self.prop_state.get('faulted', False):
+                temp_dict = current_telemetry['prop'].copy()
+                fault_flag = temp_dict.get('faulted', False)
+                current_telemetry['prop'] = make_stale(temp_dict)
+                current_telemetry['prop']['faulted'] = fault_flag
+            
+            # COMM compound fault - ALL subsystems telemetry stale (complete telemetry loss)
+            if self.comm_state.get('faulted', False):
+                for subsystem in current_telemetry:
+                    current_telemetry[subsystem] = make_stale(current_telemetry[subsystem])
+            
             # Check if spacecraft is transmitting telemetry
             comm_mode = self.comm_state['mode']
             is_downlinking = comm_mode in ['TX', 'TX_RX']
@@ -2760,9 +3290,14 @@ class SpacecraftSimulator:
                 ('avi', self.avi_state),
                 ('cdh', self.cdh_state),
                 ('ttc', self.ttc_state),
+                ('star_tracker', self.star_tracker_state),
+                ('gps', self.gps_state),
                 ('prop', self.prop_state),
                 ('comm', self.comm_state)
             ]:
+                # Check if this subsystem's telemetry is stale
+                is_stale = subsys_name in self.experimental_fault_stale_subsystems
+                
                 for key, value in subsys_data.items():
                     channel_name = f"{subsys_name.upper()}_{key.upper()}"
                     if isinstance(value, float):
@@ -2771,7 +3306,7 @@ class SpacecraftSimulator:
                         data = "YES" if value else "NO"
                     else:
                         data = str(value)
-                    channels.append((channel_name, data))
+                    channels.append((channel_name, data, is_stale))
             return channels
 
 

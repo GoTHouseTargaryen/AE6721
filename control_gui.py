@@ -13,7 +13,7 @@ class ControlGUI:
     def __init__(self, root):
         self.root = root
         self.root.title("Control | Ground Command Display | 6U CubeSat")
-        self.root.geometry("550x750")
+        self.root.geometry("900x750")  # Increased width for 2-column display
         
         # Modern color scheme (matching EID GUI)
         self.colors = {
@@ -73,7 +73,7 @@ class ControlGUI:
         self.telemetry_text = scrolledtext.ScrolledText(
             telemetry_frame, 
             height=15, 
-            width=50,
+            width=90,  # Increased width for 2-column display
             font=self.font_data,
             bg=self.colors['bg_panel'],
             fg=self.colors['fg_main'],
@@ -184,13 +184,26 @@ class ControlGUI:
         command = self.cmd_entry.get().strip()
         if command:
             try:
-                spacecraft.send_command(command)
-                # Log command to experiment manager if active
+                # Send command and check if it was accepted
+                queued = spacecraft.send_command(command)
+                
+                # Wait for command to be processed
+                import time
+                time.sleep(0.2)
+                
+                # Check execution result - verify it's the command we just sent
+                success = queued and (spacecraft.last_command == command) and spacecraft.last_command_success
+                
+                # Log command result to experiment manager if active
                 try:
                     from experiment_manager import experiment_manager
                     if experiment_manager and experiment_manager.is_running:
-                        experiment_manager.log_command(command)
-                except Exception:
+                        if not success:
+                            experiment_manager.log_command(command, success=False, error_msg="Command rejected by spacecraft")
+                        else:
+                            experiment_manager.log_command(command)
+                except Exception as e:
+                    print(f"Error logging command to experiment manager: {e}")
                     pass  # Experiment manager not active
             except Exception as e:
                 # Show a small message in EVR to avoid GUI crash
@@ -218,12 +231,34 @@ class ControlGUI:
         self.telemetry_text.config(state=tk.NORMAL)
         self.telemetry_text.delete(1.0, tk.END)
         
-        # Format as table
-        self.telemetry_text.insert(tk.END, f"{'Telemetry Channel':<25} {'Data':>10}\n")
-        self.telemetry_text.insert(tk.END, "-" * 50 + "\n")
+        # Format as 2-column table
+        # Calculate midpoint for splitting into two columns
+        mid = (len(channels) + 1) // 2
+        left_channels = channels[:mid]
+        right_channels = channels[mid:]
         
-        for channel_name, data in channels:
-            self.telemetry_text.insert(tk.END, f"{channel_name:<25} {data:>10}\n")
+        # Header
+        self.telemetry_text.insert(tk.END, f"{'Telemetry Channel':<28} {'Data':>10}  |  {'Telemetry Channel':<28} {'Data':>10}\n")
+        self.telemetry_text.insert(tk.END, "-" * 90 + "\n")
+        
+        # Display two columns side by side
+        for i in range(max(len(left_channels), len(right_channels))):
+            left_line = ""
+            right_line = ""
+            
+            if i < len(left_channels):
+                channel_name, data, is_stale = left_channels[i]
+                stale_marker = " S" if is_stale else ""
+                left_line = f"{channel_name:<28} {data:>10}{stale_marker}"
+            else:
+                left_line = " " * 38
+            
+            if i < len(right_channels):
+                channel_name, data, is_stale = right_channels[i]
+                stale_marker = " S" if is_stale else ""
+                right_line = f"{channel_name:<28} {data:>10}{stale_marker}"
+            
+            self.telemetry_text.insert(tk.END, f"{left_line}  |  {right_line}\n")
         
         # Restore scroll position
         self.telemetry_text.yview_moveto(telemetry_scroll_pos[0])

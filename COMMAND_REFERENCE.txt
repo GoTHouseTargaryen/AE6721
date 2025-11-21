@@ -8,148 +8,160 @@ anomaly response. Commands can be typed in the Control GUI command window
 or executed via buttons in the EID GUI.
 
 ================================================================================
-NOMINAL OPERATIONS COMMANDS
+ATTITUDE DETERMINATION AND CONTROL SYSTEM (ADCS) COMMANDS
 ================================================================================
 
-ATTITUDE CONTROL COMMANDS
--------------------------
-ATT_NADIR
+ADCS_ON
+    Description: Enable ADCS subsystem
+    Parameters: None
+    Example: ADCS_ON
+    Result: ADCS enabled, mode set to DETUMBLE
+    Note: ADCS must be enabled before using pointing modes
+
+ADCS_OFF
+    Description: Disable ADCS subsystem
+    Parameters: None
+    Example: ADCS_OFF
+    Result: ADCS disabled, reaction wheels stopped
+
+ADCS_NADIR
     Description: Point spacecraft nadir (Earth-facing)
     Parameters: None
-    Example: ATT_NADIR
+    Example: ADCS_NADIR
     Result: Attitude mode set to nadir pointing, targets 0° roll/pitch/yaw
+    Note: Cannot execute if ADCS is faulted
 
-ATT_SUN_POINT
+ADCS_SUN_POINT
     Description: Point spacecraft toward sun for maximum power generation
     Parameters: None
-    Example: ATT_SUN_POINT
+    Example: ADCS_SUN_POINT
     Result: Attitude mode set to sun pointing, increases solar array current
+    Note: Cannot execute if ADCS is faulted
 
-ATT_INERTIAL
+ADCS_INERTIAL
     Description: Hold current inertial attitude (no active pointing)
     Parameters: None
-    Example: ATT_INERTIAL
+    Example: ADCS_INERTIAL
     Result: Spacecraft maintains current attitude, minimal reaction wheel usage
+    Note: Cannot execute if ADCS is faulted
 
-ATT_SLEW <roll> <pitch> <yaw>
-    Description: Slew spacecraft to specified attitude
+ADCS_DETUMBLE
+    Description: Enable detumble mode to dampen rotation rates
+    Parameters: None
+    Example: ADCS_DETUMBLE
+    Result: ADCS enabled in DETUMBLE mode, reduces angular rates
+    Note: Cannot execute if ADCS is faulted
+
+ADCS_GO_TO <roll> <pitch> <yaw>
+    Description: Slew spacecraft to specified attitude and hold
     Parameters: 
         roll    - Roll angle in degrees (-180 to +180)
-        pitch   - Pitch angle in degrees (-90 to +90)
+        pitch   - Pitch angle in degrees (-180 to +180)
         yaw     - Yaw angle in degrees (-180 to +180)
     Examples:
-        ATT_SLEW 0 0 0          (point to default orientation)
-        ATT_SLEW 45 0 0         (roll 45 degrees)
-        ATT_SLEW 0 -15 90       (pitch down 15°, yaw 90°)
-    Result: Spacecraft slews to target attitude at controlled rate
+        ADCS_GO_TO 0 0 0        (point to default orientation)
+        ADCS_GO_TO 45 0 0       (roll 45 degrees)
+        ADCS_GO_TO 0 -15 90     (pitch down 15°, yaw 90°)
+    Result: Spacecraft slews to target attitude and enters FINE_HOLD mode
 
+ADCS_FINE_HOLD <roll> <pitch> <yaw>
+    Description: Set target attitude and enter fine hold mode
+    Parameters: 
+        roll    - Roll angle in degrees (-180 to +180)
+        pitch   - Pitch angle in degrees (-180 to +180)
+        yaw     - Yaw angle in degrees (-180 to +180)
+    Examples:
+        ADCS_FINE_HOLD 45 30 -15
+    Result: Target attitude set, enters FINE_HOLD mode for precise pointing
 
-OPERATIONAL MODE COMMANDS
---------------------------
-MODE_NOMINAL
-    Description: Normal operations mode
+ADCS_RESET
+    Description: Reset attitude and rates to zero
     Parameters: None
-    Example: MODE_NOMINAL
-    Power: ~10W consumption, all systems active
-    Result: Standard operations with full functionality
+    Example: ADCS_RESET
+    Result: Roll, pitch, yaw all set to 0°, rates zeroed
 
-MODE_SCIENCE
-    Description: Science/payload operations mode (high power)
+ADCS_POWER_CYCLE
+    Description: Power cycle ADCS subsystem to clear fault
     Parameters: None
-    Example: MODE_SCIENCE
-    Power: ~14W consumption, payload instruments active
-    Result: Increased power consumption for science operations
+    Example: ADCS_POWER_CYCLE
+    Result:
+        - Clears ADCS fault flag
+        - Disables ADCS
+        - Sets mode to DETUMBLE
+        - Resets reaction wheel speeds to 0 RPM
+        - Clears momentum, saturation flags, desaturation states
+    Use When: ADCS faulted, attitude control not responding
 
-MODE_LOW_POWER
-    Description: Low power conservation mode
+ADCS_DESAT
+    Description: Manual desaturation command - triggers auto-desat sequence
     Parameters: None
-    Example: MODE_LOW_POWER
+    Example: ADCS_DESAT
+    Prerequisites:
+        - ADCS enabled
+        - PROP system enabled
+        - Catalyst ready (≥300°C)
+        - Sufficient fuel (≥0.01 kg)
+    Result:
+        1. Slews to desaturation attitude based on momentum vector
+        2. Fires thrusters to reduce wheel speeds to 1000 RPM
+    Use When: Manual desaturation initiation needed
+
+ADCS_RWS_DESAT
+    Description: Legacy command - use ADCS_DESAT instead
+    Parameters: None
+    Example: ADCS_RWS_DESAT
+    Note: Functionally equivalent to ADCS_DESAT
+
+
+================================================================================
+ELECTRICAL POWER SYSTEM (EPS) COMMANDS
+================================================================================
+
+EPS_MODE_SAFE
+    Description: Set EPS to safe mode (minimal power consumption)
+    Parameters: None
+    Example: EPS_MODE_SAFE
+    Result: EPS mode set to SAFE, operational mode set to SAFE
+
+EPS_MODE_LOW_POWER
+    Description: Set EPS to low power mode
+    Parameters: None
+    Example: EPS_MODE_LOW_POWER
     Power: ~5W consumption, non-essential systems off
-    Result: Reduced functionality to conserve battery power
+    Result: EPS mode set to LOW_POWER, operational mode set to LOW_POWER
 
-
-THRESHOLD ADJUSTMENT COMMANDS
-------------------------------
-THR_BATT_MIN <voltage>
-    Description: Set minimum battery voltage threshold (warning level)
-    Parameters:
-        voltage - Voltage in volts (V), typically 10.5-11.5V for 12V system
-    Examples:
-        THR_BATT_MIN 10.8       (set warning at 10.8V)
-        THR_BATT_MIN 11.0       (more conservative threshold)
-    Result: Warning triggers when battery drops below this value
-
-THR_BATT_CAUT <voltage>
-    Description: Set battery caution voltage threshold
-    Parameters:
-        voltage - Voltage in volts (V), typically 11.0-11.5V
-    Examples:
-        THR_BATT_CAUT 11.2      (caution at 11.2V)
-        THR_BATT_CAUT 11.5      (earlier warning)
-    Result: Caution triggers when battery drops below this value
-
-THR_TEMP_MIN <temperature>
-    Description: Set minimum internal temperature threshold (warning level)
-    Parameters:
-        temperature - Temperature in Celsius (°C)
-    Examples:
-        THR_TEMP_MIN 0          (warning below 0°C)
-        THR_TEMP_MIN 5          (warning below 5°C)
-    Result: Warning triggers when temp drops below this value
-
-THR_TEMP_MAX <temperature>
-    Description: Set maximum internal temperature threshold (warning level)
-    Parameters:
-        temperature - Temperature in Celsius (°C)
-    Examples:
-        THR_TEMP_MAX 40         (warning above 40°C)
-        THR_TEMP_MAX 45         (higher tolerance)
-    Result: Warning triggers when temp exceeds this value
-
-THR_ATT_CAUT <degrees>
-    Description: Set attitude deviation caution threshold
-    Parameters:
-        degrees - Angle in degrees from target attitude
-    Examples:
-        THR_ATT_CAUT 5          (caution at 5° deviation)
-        THR_ATT_CAUT 10         (more tolerant)
-    Result: Caution triggers when attitude deviates beyond this angle
-
-THR_ATT_WARN <degrees>
-    Description: Set attitude deviation warning threshold
-    Parameters:
-        degrees - Angle in degrees from target attitude
-    Examples:
-        THR_ATT_WARN 10         (warning at 10° deviation)
-        THR_ATT_WARN 15         (more tolerant)
-    Result: Warning triggers when attitude deviates beyond this angle
-
-
-================================================================================
-ANOMALY RESPONSE COMMANDS
-================================================================================
-
-SAFE_MODE
-    Description: Enter safe mode - minimal power, sun pointing, all systems reset
+EPS_MODE_NOMINAL
+    Description: Set EPS to nominal operations mode
     Parameters: None
-    Example: SAFE_MODE
-    Result: 
-        - Operational mode set to SAFE
-        - Attitude set to sun pointing
-        - All attitudes reset to 0°
-        - Battery protected (min consumption)
-        - All anomaly flags cleared
-    Use When: Multiple failures, critical battery, unknown anomaly
+    Example: EPS_MODE_NOMINAL
+    Power: ~10W consumption, all systems active
+    Result: EPS mode set to NOMINAL, operational mode set to NOMINAL
 
-PWR_RESET
+EPS_MODE_SCIENCE
+    Description: Set EPS to science mode (high power)
+    Parameters: None
+    Example: EPS_MODE_SCIENCE
+    Power: ~14W consumption, payload instruments active
+    Result: EPS mode set to SCIENCE, operational mode set to SCIENCE
+
+EPS_RESET
     Description: Reset power system to nominal state
     Parameters: None
-    Example: PWR_RESET
+    Example: EPS_RESET
     Result:
         - Battery A voltage restored to 11.8V (85% SOC)
         - Battery B voltage restored to 11.8V (85% SOC)
         - Power anomaly flag cleared
     Use When: Battery voltage anomaly, power system fault
+
+EPS_POWER_CYCLE
+    Description: Power cycle EPS subsystem to clear fault
+    Parameters: None
+    Example: EPS_POWER_CYCLE
+    Result:
+        - Clears EPS fault flag
+        - Sets mode to NOMINAL
+    Use When: EPS faulted, power management not responding
 
 EPS_DEPLOY_ARRAY_A
     Description: Deploy solar array A
@@ -162,6 +174,16 @@ EPS_DEPLOY_ARRAY_A
     Use When: Initial deployment after launch, or after array stowage
     Note: Arrays must be deployed to generate power
 
+EPS_UNDEPLOY_ARRAY_A
+    Description: Stow/undeploy solar array A
+    Parameters: None
+    Example: EPS_UNDEPLOY_ARRAY_A
+    Result:
+        - Solar array A stowed
+        - Array A stops generating power
+        - EVR log entry created
+    Use When: Testing, thermal management, or contingency operations
+
 EPS_DEPLOY_ARRAY_B
     Description: Deploy solar array B
     Parameters: None
@@ -173,33 +195,60 @@ EPS_DEPLOY_ARRAY_B
     Use When: Initial deployment after launch, or after array stowage
     Note: Arrays must be deployed to generate power
 
+EPS_UNDEPLOY_ARRAY_B
+    Description: Stow/undeploy solar array B
+    Parameters: None
+    Example: EPS_UNDEPLOY_ARRAY_B
+    Result:
+        - Solar array B stowed
+        - Array B stops generating power
+        - EVR log entry created
+    Use When: Testing, thermal management, or contingency operations
+
 EPS_CROSS_CHARGE_ENABLE
-    Description: Enable cross-charging between Battery A and Battery B
+    Description: Enable cross-charging between Solar Arrays and Batteries
     Parameters: None
     Example: EPS_CROSS_CHARGE_ENABLE
     Result:
         - Cross-charging enabled
-        - Batteries will balance voltage/SOC automatically
-        - Higher voltage battery transfers charge to lower voltage battery
+        - Solar Array A can charge Battery A OR Battery B
+        - Solar Array B can charge Battery A OR Battery B
+        - Total solar power pooled and distributed evenly to both batteries
+        - Provides redundancy if one array or battery fails
         - EVR log entry created
-    Use When: One battery significantly lower than other, need balanced system
-    Note: Provides redundancy but reduces charging efficiency slightly
+    Use When: Need redundant power paths, one array degraded, maximize reliability
+    Note: Reduces single-point-of-failure risk
 
 EPS_CROSS_CHARGE_DISABLE
-    Description: Disable cross-charging between batteries
+    Description: Disable cross-charging between arrays and batteries
     Parameters: None
     Example: EPS_CROSS_CHARGE_DISABLE
     Result:
         - Cross-charging disabled
-        - Battery A charges only from Array A
-        - Battery B charges only from Array B
+        - Solar Array A charges only Battery A
+        - Solar Array B charges only Battery B
+        - Independent power paths (no cross-coupling)
         - EVR log entry created
-    Use When: One battery suspected faulty, want independent operation
-    Note: Default state - batteries operate independently for maximum reliability
+    Use When: Isolate faulty battery/array, normal operations, maximum efficiency
+    Note: Default state - independent operation for fault isolation
 
 
-COMMUNICATIONS SYSTEM COMMANDS
--------------------------------
+================================================================================
+COMMUNICATIONS SYSTEM (COMM) COMMANDS
+===============================================================================
+
+COMM_TX_RX
+    Description: Set communications to full duplex mode (simultaneous TX/RX)
+    Parameters: None
+    Example: COMM_TX_RX
+    Result:
+        - COMM mode set to TX_RX (full duplex)
+        - Can transmit and receive simultaneously
+        - Highest power consumption mode (~35W)
+        - No timeout - remains in full duplex until commanded otherwise
+    Use When: Critical operations requiring continuous uplink/downlink
+    Note: Exits safe mode if active, cannot execute if COMM faulted
+
 COMM_TX [timeout_seconds]
     Description: Set communications to transmit mode
     Parameters: 
@@ -210,9 +259,9 @@ COMM_TX [timeout_seconds]
     Result:
         - COMM mode set to TX
         - Transmit power active at current setting (20/27/30 dBm)
-        - RX disabled (cannot receive during TX)
+        - RX disabled (cannot receive during TX) - NOT COMMANDABLE
     Use When: Need to transmit telemetry or command acknowledgments
-    Note: High power consumption - return to RX when not transmitting
+    Note: High power consumption (~30W), cannot execute if COMM faulted
 
 COMM_RX
     Description: Set communications to receive mode
@@ -220,22 +269,10 @@ COMM_RX
     Example: COMM_RX
     Result:
         - COMM mode set to RX
-        - Ready to receive uplink commands
-        - Lower power consumption than TX
+        - Ready to receive uplink commands (COMMANDABLE)
+        - Lower power consumption (~5W) than TX
     Use When: Normal operations, listening for ground commands
-    Note: Default/nominal mode for COMM system
-
-COMM_TX_RX
-    Description: Set communications to full duplex mode (simultaneous TX/RX)
-    Parameters: None
-    Example: COMM_TX_RX
-    Result:
-        - COMM mode set to TX_RX (full duplex)
-        - Can transmit and receive simultaneously
-        - Highest power consumption mode
-        - No timeout - remains in full duplex until commanded otherwise
-    Use When: Critical operations requiring continuous uplink/downlink
-    Note: Exits safe mode if active
+    Note: Default/nominal mode for COMM system, cannot execute if COMM faulted
 
 COMM_STANDBY
     Description: Set communications to standby (low power, minimal activity)
@@ -244,9 +281,9 @@ COMM_STANDBY
     Result:
         - COMM mode set to STANDBY
         - Cannot TX or RX
-        - Lowest power consumption
+        - Lowest power consumption (~1W)
     Use When: Power conservation, thermal management
-    Note: Must return to RX/TX to resume communications
+    Note: Must return to RX/TX to resume communications, cannot execute if COMM faulted
 
 COMM_POWER_30
     Description: Set transmit power to high (30 dBm / 1W)
@@ -268,6 +305,30 @@ COMM_POWER_20
     Example: COMM_POWER_20
     Result: TX power set to 20 dBm (minimum)
     Use When: Close proximity ground station, power conservation
+
+COMM_RESET
+    Description: Reset communication system
+    Parameters: None
+    Example: COMM_RESET
+    Result:
+        - COMM mode set to RX
+        - TX power reset to 30 dBm
+        - Temperature reset to 30°C
+        - Packet counters zeroed
+        - Comm anomaly flag cleared
+    Use When: Communication degradation, signal loss
+
+COMM_POWER_CYCLE
+    Description: Power cycle COMM subsystem to clear fault
+    Parameters: None
+    Example: COMM_POWER_CYCLE
+    Result:
+        - Clears COMM fault flag
+        - Sets mode to RX (receive)
+        - Resets temp to 30°C
+        - Resets TX power to 30 dBm
+        - Resets voltage and current
+    Use When: COMM faulted, communications not responding
 
 
 ================================================================================
@@ -291,7 +352,7 @@ PROP_STANDBY
         - Electronics and sensors powered
         - Heater and valves remain unpowered
     Use When: Preparing for propulsion operations
-    Note: Required before PROP_ON
+    Note: Required before PROP_ON, cannot execute if PROP faulted
 
 PROP_ON
     Description: Enable full propulsion system (VBat power)
@@ -304,6 +365,7 @@ PROP_ON
         - System ready for catalyst heating
     Use When: Need thrust capability
     Note: Does not automatically enable heater - use PROP_HEATER_ON
+    Cannot execute if PROP faulted or standby not enabled
 
 PROP_OFF
     Description: Disable propulsion system completely
@@ -314,6 +376,7 @@ PROP_OFF
         - Closes valve
         - Turns off catalyst heater
         - Catalyst begins cooling
+
     Use When: End of propulsion operations, power conservation
 
 PROP_HEATER_ON
@@ -327,6 +390,7 @@ PROP_HEATER_ON
         - Takes 2-3 minutes to reach ready state (300°C)
     Use When: Preparing for thrust operations
     Note: Monitor catalyst_temp and catalyst_ready telemetry
+    Cannot execute if PROP faulted or system not enabled
 
 PROP_HEATER_OFF
     Description: Turn off catalyst bed heater
@@ -352,6 +416,7 @@ PROP_VALVE_OPEN
         - Propellant consumed (~0.001 kg/sec)
     Use When: Performing maneuvers (desaturation, orbit adjust)
     Warning: Valve automatically closes if catalyst not ready
+    Cannot execute if PROP faulted
 
 PROP_VALVE_CLOSE
     Description: Close propellant valve to stop thrust
@@ -362,158 +427,6 @@ PROP_VALVE_CLOSE
         - Thrust stops
         - Propellant consumption stops
     Use When: End of maneuver
-
-Typical Propulsion Operation Sequence:
-    1. PROP_STANDBY           (Enable 5V electronics)
-    2. PROP_ON                (Enable VBat power)
-    3. PROP_HEATER_ON         (Start catalyst heating)
-    4. [Wait 2-3 min]         (Monitor catalyst_temp, wait for catalyst_ready)
-    5. PROP_VALVE_OPEN        (Produce thrust)
-    6. [Perform maneuver]
-    7. PROP_VALVE_CLOSE       (Stop thrust)
-    8. PROP_HEATER_OFF        (Optional: save power)
-    9. PROP_OFF               (Shutdown when done)
-
-
-ATT_RESET
-    Description: Reset attitude control system
-    Parameters: None
-    Example: ATT_RESET
-    Result:
-        - Roll, pitch, yaw all set to 0°
-        - Target attitude reset
-        - Attitude anomaly flag cleared
-    Use When: Attitude deviation, control system fault
-
-THERM_RESET
-    Description: Reset thermal control system
-    Parameters: None
-    Example: THERM_RESET
-    Result:
-        - Internal temperature restored to 20°C nominal
-        - Temperature anomaly flags cleared
-    Use When: Over-temperature, under-temperature condition
-
-COMM_RESET
-    Description: Reset communication system
-    Parameters: None
-    Example: COMM_RESET
-    Result:
-        - Communication signal restored to 95%
-        - Comm anomaly flag cleared
-    Use When: Communication degradation, signal loss
-
-CLEAR_CAUTIONS
-    Description: Clear all caution flags (only if telemetry is nominal)
-    Parameters: None
-    Example: CLEAR_CAUTIONS
-    Aliases: CLEAR_CAUT
-    Result:
-        - Clears caution flags if values are within nominal ranges
-        - Does NOT clear if telemetry is still out of range
-    Use When: After fixing issues, to acknowledge cautions
-
-BATT_CHARGE
-    Description: Boost battery charge by 1V
-    Parameters: None
-    Example: BATT_CHARGE
-    Result:
-        - Battery voltage increased by 1.0V (max 12.6V)
-        - Battery anomaly cleared
-    Use When: Battery low but not critical, need quick charge
-
-EMERG_SHUTDOWN
-    Description: Emergency shutdown of non-essential systems
-    Parameters: None
-    Example: EMERG_SHUTDOWN
-    Result:
-        - Mode changed to LOW_POWER
-        - Battery current reduced to 0.4A (minimum)
-    Use When: Critical battery situation, need to preserve power
-
-DIAG_MODE
-    Description: Enter diagnostic mode for system testing
-    Parameters: None
-    Example: DIAG_MODE
-    Result: Log entry created, diagnostic tests initiated
-    Use When: Investigating anomalies, routine maintenance
-
-
-================================================================================
-QUICK COMMAND SHORTCUTS (Button Commands)
-================================================================================
-
-CMD1 or CMD 1
-    Quick Action: Set nadir pointing
-    Equivalent: ATT_NADIR
-
-CMD2 or CMD 2
-    Quick Action: Set sun pointing
-    Equivalent: ATT_SUN_POINT
-
-CMD3 or CMD 3
-    Quick Action: Enter science mode
-    Equivalent: MODE_SCIENCE
-
-CMD4 or CMD 4
-    Quick Action: Enter low power mode
-    Equivalent: MODE_LOW_POWER
-
-CMD5 or CMD 5
-    Quick Action: Clear all cautions
-    Equivalent: CLEAR_CAUTIONS
-
-CMD6 or CMD 6
-    Quick Action: System health check
-    Result: Reports all systems nominal
-
-CMD7 or CMD 7
-    Quick Action: Set communication rate to 9600 bps
-    Result: Data rate set to maximum
-
-CMD8 or CMD 8
-    Quick Action: Reset watchdog timer
-    Result: Watchdog timer reset logged
-
-
-================================================================================
-FAULT RECOVERY COMMANDS
-================================================================================
-
-When a subsystem fault is detected (faulted=True), that subsystem cannot be
-enabled or commanded until it is power cycled. Power cycle commands clear the
-fault flag and reset the subsystem to a safe default state.
-
-ADCS_POWER_CYCLE
-    Description: Power cycle ADCS subsystem to clear fault
-    Parameters: None
-    Example: ADCS_POWER_CYCLE
-    Result:
-        - Clears ADCS fault flag
-        - Disables ADCS
-        - Sets mode to DETUMBLE
-        - Resets reaction wheel speeds to 0 RPM
-    Use When: ADCS faulted, attitude control not responding
-
-EPS_POWER_CYCLE
-    Description: Power cycle EPS subsystem to clear fault
-    Parameters: None
-    Example: EPS_POWER_CYCLE
-    Result:
-        - Clears EPS fault flag
-        - Sets mode to NOMINAL
-    Use When: EPS faulted, power management not responding
-
-COMM_POWER_CYCLE
-    Description: Power cycle COMM subsystem to clear fault
-    Parameters: None
-    Example: COMM_POWER_CYCLE
-    Result:
-        - Clears COMM fault flag
-        - Sets mode to RX (receive)
-        - Resets temp to 25°C
-        - Resets TX power to 27 dBm
-    Use When: COMM faulted, communications not responding
 
 PROP_POWER_CYCLE
     Description: Power cycle Propulsion subsystem to clear fault
@@ -527,6 +440,84 @@ PROP_POWER_CYCLE
         - Resets all propulsion systems
     Use When: PROP faulted, propulsion not responding
 
+Typical Propulsion Operation Sequence:
+    1. PROP_STANDBY           (Enable 5V electronics)
+    2. PROP_ON                (Enable VBat power)
+    3. PROP_HEATER_ON         (Start catalyst heating)
+    4. [Wait 2-3 min]         (Monitor catalyst_temp, wait for catalyst_ready)
+    5. PROP_VALVE_OPEN        (Produce thrust)
+    6. [Perform maneuver]
+    7. PROP_VALVE_CLOSE       (Stop thrust)
+    8. PROP_HEATER_OFF        (Optional: save power)
+    9. PROP_OFF               (Shutdown when done)
+
+
+================================================================================
+THERMAL CONTROL SYSTEM (TCS) COMMANDS
+================================================================================
+
+TCS_DEPLOY_RADIATOR
+    Description: Deploy thermal radiator
+    Parameters: None
+    Example: TCS_DEPLOY_RADIATOR
+    Result:
+        - Radiator deployed
+        - Enhanced thermal radiation capability
+        - EVR log entry created
+    Use When: Initial deployment after launch, thermal management
+
+TCS_UNDEPLOY_RADIATOR
+    Description: Stow thermal radiator
+    Parameters: None
+    Example: TCS_UNDEPLOY_RADIATOR
+    Result:
+        - Radiator stowed
+        - Reduced thermal radiation
+        - EVR log entry created
+    Use When: Testing or thermal configuration changes
+
+TCS_HEATER_AVI_ON
+    Description: Turn on avionics heater
+    Parameters: None
+    Example: TCS_HEATER_AVI_ON
+    Result: Avionics heater enabled
+    Use When: Avionics temperature too low
+
+TCS_HEATER_AVI_OFF
+    Description: Turn off avionics heater
+    Parameters: None
+    Example: TCS_HEATER_AVI_OFF
+    Result: Avionics heater disabled
+    Use When: Avionics temperature nominal or high
+
+TCS_HEATER_EPS_ON
+    Description: Turn on EPS heater
+    Parameters: None
+    Example: TCS_HEATER_EPS_ON
+    Result: EPS heater enabled
+    Use When: EPS temperature too low
+
+TCS_HEATER_EPS_OFF
+    Description: Turn off EPS heater
+    Parameters: None
+    Example: TCS_HEATER_EPS_OFF
+    Result: EPS heater disabled
+    Use When: EPS temperature nominal or high
+
+TCS_HEATER_PROP_ON
+    Description: Turn on propulsion heater
+    Parameters: None
+    Example: TCS_HEATER_PROP_ON
+    Result: Propulsion heater enabled
+    Use When: Propulsion system temperature too low
+
+TCS_HEATER_PROP_OFF
+    Description: Turn off propulsion heater
+    Parameters: None
+    Example: TCS_HEATER_PROP_OFF
+    Result: Propulsion heater disabled
+    Use When: Propulsion temperature nominal or high
+
 TCS_POWER_CYCLE
     Description: Power cycle Thermal Control subsystem to clear fault
     Parameters: None
@@ -536,6 +527,38 @@ TCS_POWER_CYCLE
         - Turns off all heaters (AVI, EPS, PROP)
     Use When: TCS faulted, thermal control not responding
 
+
+================================================================================
+AVIONICS (AVI) COMMANDS
+================================================================================
+
+AVI_REBOOT
+    Description: Reboot avionics computer
+    Parameters: None
+    Example: AVI_REBOOT
+    Result:
+        - Avionics CPU rebooted
+        - CPU load reset to 30%
+        - CPU temp reset to 40°C
+        - Memory usage reset to 45%
+        - EVR log entry created
+    Use When: Software hang, high CPU load, memory issues
+
+AVI_POWER_CYCLE
+    Description: Power cycle Avionics subsystem to clear fault
+    Parameters: None
+    Example: AVI_POWER_CYCLE
+    Result:
+        - Clears AVI fault flag
+        - Resets CPU load, temperature, memory usage
+        - Resets voltage and current
+    Use When: AVI faulted, avionics not responding
+
+
+================================================================================
+COMMAND & DATA HANDLING (CDH) COMMANDS
+================================================================================
+
 CDH_POWER_CYCLE
     Description: Power cycle Command & Data Handling subsystem to clear fault
     Parameters: None
@@ -543,7 +566,14 @@ CDH_POWER_CYCLE
     Result:
         - Clears CDH fault flag
         - Resets error count to 0
+        - Resets command count
+        - Resets voltage and current
     Use When: CDH faulted, data handling not responding
+
+
+================================================================================
+TT&C (TELEMETRY, TRACKING & COMMAND) COMMANDS
+================================================================================
 
 TTC_POWER_CYCLE
     Description: Power cycle TT&C subsystem to clear fault
@@ -552,29 +582,9 @@ TTC_POWER_CYCLE
     Result:
         - Clears TTC fault flag
         - Resets link status to 'NO_LINK'
+        - Resets signal strength
+        - Resets voltage and current
     Use When: TTC faulted, telemetry tracking not responding
-
-STAR_TRACKER_POWER_CYCLE
-    Description: Power cycle Star Tracker to clear fault
-    Parameters: None
-    Example: STAR_TRACKER_POWER_CYCLE
-    Result:
-        - Clears Star Tracker fault flag
-        - Disables Star Tracker
-        - Resets star count to 0
-        - Clears attitude solution
-    Use When: Star Tracker faulted, precision attitude unavailable
-
-GPS_POWER_CYCLE
-    Description: Power cycle GPS receiver to clear fault
-    Parameters: None
-    Example: GPS_POWER_CYCLE
-    Result:
-        - Clears GPS fault flag
-        - Disables GPS
-        - Resets satellite count to 0
-        - Clears position/velocity solution
-    Use When: GPS faulted, navigation solution unavailable
 
 
 ================================================================================
@@ -604,6 +614,18 @@ STAR_TRACKER_OFF
         - Attitude solution no longer updated
     Use When: Power conservation, not needed for current operations
 
+STAR_TRACKER_POWER_CYCLE
+    Description: Power cycle Star Tracker to clear fault
+    Parameters: None
+    Example: STAR_TRACKER_POWER_CYCLE
+    Result:
+        - Clears Star Tracker fault flag
+        - Disables Star Tracker
+        - Resets star count to 0
+        - Clears attitude solution (roll, pitch, yaw)
+        - Resets voltage and current
+    Use When: Star Tracker faulted, precision attitude unavailable
+
 GPS_ON
     Description: Enable GPS receiver for position/velocity determination
     Parameters: None
@@ -626,6 +648,59 @@ GPS_OFF
         - Satellite tracking halted
         - Position/velocity solution no longer updated
     Use When: Power conservation, orbit determination not critical
+
+GPS_POWER_CYCLE
+    Description: Power cycle GPS receiver to clear fault
+    Parameters: None
+    Example: GPS_POWER_CYCLE
+    Result:
+        - Clears GPS fault flag
+        - Disables GPS
+        - Resets satellite count to 0
+        - Clears position/velocity solution
+        - Resets voltage and current
+    Use When: GPS faulted, navigation solution unavailable
+
+
+================================================================================
+SAFE MODE AND SYSTEM COMMANDS
+================================================================================
+
+SAFE_MODE
+    Description: Enter safe mode - minimal power, sun pointing, all systems reset
+    Parameters: None
+    Example: SAFE_MODE
+    Result: 
+        - Operational mode set to SAFE
+        - EPS mode set to SAFE
+        - Attitude set to sun pointing (if ADCS not faulted)
+        - ADCS kept in DETUMBLE mode for attitude stabilization
+        - COMM cycles: 60s RX → 60s TX → 30s TX_RX (repeating)
+        - Battery protected (min consumption)
+        - All anomaly flags cleared
+    Use When: Multiple failures, critical battery, unknown anomaly
+    Note: If ADCS faulted, attitude control unavailable in safe mode
+
+EXIT_SAFE_MODE
+    Description: Exit safe mode and return to nominal operations
+    Parameters: None
+    Example: EXIT_SAFE_MODE
+    Result:
+        - Operational mode set to NOMINAL
+        - EPS mode set to NOMINAL
+        - COMM cycling stopped
+        - EVR log entry created
+    Use When: After resolving safe mode triggering conditions
+
+SYS_RESET
+    Description: System-wide reset (comprehensive reset of all subsystems)
+    Parameters: None
+    Example: SYS_RESET
+    Result:
+        - Resets all subsystem states
+        - Clears all anomaly flags
+        - EVR log entry created
+    Use When: Major system malfunction requiring full reset
 
 
 ================================================================================
@@ -661,23 +736,64 @@ FAULT_INJECTION_DISABLE
 
 
 ================================================================================
+LEGACY COMMANDS (For Backward Compatibility)
+================================================================================
+
+Note: These commands still work but use new subsystem-prefixed versions for clarity.
+
+ATT_NADIR → Use ADCS_NADIR
+ATT_SUN_POINT → Use ADCS_SUN_POINT
+ATT_INERTIAL → Use ADCS_INERTIAL
+ATT_SLEW → Use ADCS_GO_TO or ADCS_FINE_HOLD
+ATT_RESET → Use ADCS_RESET
+
+MODE_NOMINAL → Use EPS_MODE_NOMINAL
+MODE_SCIENCE → Use EPS_MODE_SCIENCE
+MODE_LOW_POWER → Use EPS_MODE_LOW_POWER
+
+PWR_RESET → Use EPS_RESET
+
+THR_BATT_MIN <voltage> → No direct replacement (threshold system removed)
+THR_BATT_CAUT <voltage> → No direct replacement (threshold system removed)
+THR_TEMP_MIN <temp> → No direct replacement (threshold system removed)
+THR_TEMP_MAX <temp> → No direct replacement (threshold system removed)
+THR_ATT_CAUT <degrees> → No direct replacement (threshold system removed)
+THR_ATT_WARN <degrees> → No direct replacement (threshold system removed)
+
+CLEAR_CAUTIONS → Still supported
+CLEAR_CAUT → Alias for CLEAR_CAUTIONS
+BATT_CHARGE → No longer supported
+EMERG_SHUTDOWN → Use EPS_MODE_LOW_POWER
+DIAG_MODE → No longer supported
+THERM_RESET → Use TCS_POWER_CYCLE
+
+CMD1 → Use ADCS_NADIR
+CMD2 → Use ADCS_SUN_POINT
+CMD3 → Use EPS_MODE_SCIENCE
+CMD4 → Use EPS_MODE_LOW_POWER
+CMD5 → Use CLEAR_CAUTIONS
+CMD6 → No longer supported
+CMD7 → No longer supported
+CMD8 → No longer supported
+
+
+================================================================================
 COMMAND SYNTAX RULES
 ================================================================================
 
-1. Commands are case-insensitive (ATT_NADIR = att_nadir = Att_Nadir)
+1. Commands are case-insensitive (ADCS_NADIR = adcs_nadir = Adcs_Nadir)
 
 2. Parameters must be separated by spaces
 
 3. Numeric parameters:
-   - Voltages: 10.0 to 13.0 (V)
-   - Temperatures: -20 to 50 (°C)
    - Angles: -180 to +180 (degrees)
+   - Timeout: seconds (0 = no timeout)
 
-4. Multiple word commands use underscores (ATT_SLEW, not ATT SLEW)
+4. Multiple word commands use underscores (ADCS_GO_TO, not ADCS GO TO)
 
 5. Parameters in <brackets> are required
 
-6. Parameters in [brackets] are optional (not used in current version)
+6. Parameters in [brackets] are optional
 
 
 ================================================================================
@@ -686,24 +802,24 @@ TYPICAL COMMAND SEQUENCES
 
 SCENARIO: Battery Low During Eclipse
 -------------------------------------
-1. ATT_SUN_POINT          (maximize solar exposure)
-2. MODE_LOW_POWER         (reduce consumption)
+1. ADCS_SUN_POINT         (maximize solar exposure)
+2. EPS_MODE_LOW_POWER     (reduce consumption)
 3. Wait for sun exposure
-4. MODE_NOMINAL           (return to normal ops)
+4. EPS_MODE_NOMINAL       (return to normal ops)
 
 SCENARIO: Attitude Deviation Detected
 --------------------------------------
-1. ATT_RESET              (reset attitude to 0°)
-2. ATT_NADIR              (resume nadir pointing)
+1. ADCS_RESET             (reset attitude to 0°)
+2. ADCS_NADIR             (resume nadir pointing)
 3. CLEAR_CAUTIONS         (clear caution flags)
 
 SCENARIO: Temperature Exceeds Limits
 -------------------------------------
-1. MODE_LOW_POWER         (reduce heat generation)
-2. ATT_SLEW 0 0 90        (different thermal orientation)
+1. EPS_MODE_LOW_POWER     (reduce heat generation)
+2. ADCS_GO_TO 0 0 90      (different thermal orientation)
 3. Wait for cooling
-4. THERM_RESET            (reset thermal system)
-5. MODE_NOMINAL           (resume operations)
+4. TCS_POWER_CYCLE        (reset thermal system if needed)
+5. EPS_MODE_NOMINAL       (resume operations)
 
 SCENARIO: Multiple System Failures
 -----------------------------------
@@ -711,17 +827,29 @@ SCENARIO: Multiple System Failures
 2. Wait for stabilization
 3. Assess systems via EVR log
 4. Gradually return to nominal:
-   a. MODE_NOMINAL
-   b. ATT_NADIR
-   c. CLEAR_CAUTIONS
+   a. EXIT_SAFE_MODE
+   b. EPS_MODE_NOMINAL
+   c. ADCS_NADIR
+   d. CLEAR_CAUTIONS
 
 SCENARIO: Science Operation Pass
 ---------------------------------
-1. ATT_SLEW 0 -15 0       (point at target)
-2. MODE_SCIENCE           (activate payload)
+1. ADCS_GO_TO 0 -15 0     (point at target)
+2. EPS_MODE_SCIENCE       (activate payload)
 3. Wait for data collection
-4. MODE_NOMINAL           (return to standard)
-5. ATT_NADIR              (return to Earth-facing)
+4. EPS_MODE_NOMINAL       (return to standard)
+5. ADCS_NADIR             (return to Earth-facing)
+
+SCENARIO: Reaction Wheel Desaturation
+--------------------------------------
+1. PROP_STANDBY           (Enable propulsion electronics)
+2. PROP_ON                (Enable VBat power)
+3. PROP_HEATER_ON         (Start catalyst heating)
+4. [Wait 2-3 min]         (Monitor catalyst_temp until ready)
+5. ADCS_DESAT             (Automatic desaturation sequence)
+6. [Wait for completion]  (Monitor wheel speeds)
+7. PROP_HEATER_OFF        (Turn off heater)
+8. PROP_OFF               (Shutdown propulsion)
 
 
 ================================================================================
@@ -734,11 +862,23 @@ Battery Voltage (12V System):
     Warning:  < 10.8 V (red)
     Critical: < 10.5 V (emergency shutdown recommended)
 
-Internal Temperature:
-    Nominal:  5 - 35 °C
-    Caution:  0 - 5 °C or 35 - 40 °C (yellow)
-    Warning:  < 0 °C or > 40 °C (red)
-    Critical: < -5 °C or > 45 °C
+Avionics Temperature:
+    Nominal:  15 - 45 °C
+    Caution:  10 - 15 °C or 45 - 50 °C (yellow)
+    Warning:  < 10 °C or > 50 °C (red)
+    Critical: < 5 °C or > 55 °C
+
+EPS Temperature:
+    Nominal:  10 - 40 °C
+    Caution:  5 - 10 °C or 40 - 45 °C (yellow)
+    Warning:  < 5 °C or > 45 °C (red)
+    Critical: < 0 °C or > 50 °C
+
+COMM Temperature:
+    Nominal:  20 - 50 °C
+    Caution:  15 - 20 °C or 50 - 55 °C (yellow)
+    Warning:  < 15 °C or > 55 °C (red)
+    Critical: < 10 °C or > 60 °C
 
 Attitude Deviation:
     Nominal:  < 5° from target
@@ -746,11 +886,22 @@ Attitude Deviation:
     Warning:  > 10° (red)
     Critical: > 15° (control authority lost)
 
-Communication Signal:
-    Nominal:  > 75%
-    Caution:  60 - 75% (yellow)
-    Warning:  < 60% (red)
-    Critical: < 40% (potential loss of signal)
+Reaction Wheel Speed:
+    Nominal:  < 4500 RPM
+    Caution:  4500 - 5500 RPM (yellow)
+    Warning:  5500 - 6000 RPM (red)
+    Saturated: ≥ 6000 RPM (desaturation required)
+
+Propellant Mass:
+    Nominal:  > 0.15 kg
+    Caution:  0.10 - 0.15 kg (yellow)
+    Warning:  < 0.10 kg (red)
+    Critical: < 0.01 kg (insufficient for operations)
+
+Catalyst Temperature (when PROP enabled):
+    Not Ready:  < 300 °C
+    Ready:      ≥ 300 °C
+    Target:     350 °C
 
 
 ================================================================================
@@ -764,9 +915,9 @@ All commands are logged in the EVR (Event Record) log with:
 - System state changes
 
 Example EVR entries:
-    2025-10-20 14:23:15 - CMD: Attitude mode set to NADIR pointing
-    2025-10-20 14:23:45 - CMD: Battery minimum threshold set to 10.8V
-    2025-10-20 14:24:12 - RESPONSE: Power system reset - battery restored to nominal
+    2025-11-21 14:23:15 - Executing command: ADCS_NADIR
+    2025-11-21 14:23:45 - PROP: Catalyst bed ready for operation (T > 300°C)
+    2025-11-21 14:24:12 - EPS reset - batteries restored to nominal
 
 
 ================================================================================
@@ -776,8 +927,13 @@ ERROR MESSAGES
 Invalid Syntax:
     "ERROR: Invalid <command> syntax. Use: <proper syntax>"
 
-Out of Range:
-    "ERROR: Parameter out of range. Valid range: <min> to <max>"
+Faulted Subsystem:
+    "<COMMAND> rejected - <SUBSYSTEM> faulted (power cycle required)"
+
+Prerequisites Not Met:
+    "PROP_ON rejected - standby mode required first"
+    "ADCS desaturation failed - PROP not enabled"
+    "ADCS desaturation failed - catalyst not ready (need 300°C+)"
 
 Command Not Recognized:
     "Command received: <text>" (acknowledged but no action taken)
@@ -787,23 +943,236 @@ Command Not Recognized:
 NOTES
 ================================================================================
 
-1. Commands execute immediately (no confirmation required for safety)
+1. Commands execute immediately (no confirmation required)
 2. For real missions, critical commands would require confirmation
-3. Threshold changes persist until reset or spacecraft reboot
-4. Safe mode can be exited by sending MODE_NOMINAL
-5. All angles use aerospace convention: 
+3. All angles use aerospace convention: 
    - Roll: rotation about X (forward) axis
    - Pitch: rotation about Y (starboard) axis  
    - Yaw: rotation about Z (nadir) axis
-6. FAULTED SUBSYSTEMS: When a subsystem shows 'faulted: True', it cannot be
+4. FAULTED SUBSYSTEMS: When a subsystem shows 'faulted: True', it cannot be
    enabled or commanded until you send the appropriate POWER_CYCLE command.
    Example: If ADCS is faulted, commands like ADCS_NADIR will be rejected
-   with "ADCS mode rejected - ADCS faulted (power cycle required)"
-7. SAFE MODE ADCS: When entering safe mode, ADCS will remain enabled in
+   with "ADCS_NADIR rejected - ADCS faulted (power cycle required)"
+5. SAFE MODE ADCS: When entering safe mode, ADCS will remain enabled in
    DETUMBLE mode for attitude stabilization, UNLESS the ADCS itself is
    faulted. This ensures the spacecraft maintains attitude control during
    emergencies whenever possible.
+6. COMM MODES: TX mode disables receive capability - spacecraft NOT commandable
+   during TX-only mode. Use COMM_RX or COMM_TX_RX to restore commandability.
+7. PROPULSION SEQUENCE: Always follow proper startup sequence (STANDBY → ON →
+   HEATER_ON → wait for catalyst ready). Valve will auto-close if catalyst
+   temp drops below 300°C.
+8. DESATURATION: Automatic desaturation triggers when any wheel exceeds 5500 RPM
+   (if PROP enabled and catalyst ready). Manual desaturation via ADCS_DESAT.
+
+
+================================================================================
+OFF-NOMINAL COMPOUND ANOMALY RECOVERY PROCEDURES
+================================================================================
+
+During off-nominal scenarios, the spacecraft may experience compound anomalies
+where 2 simultaneous faults occur between 3-5 minutes. These faults require
+multi-step recovery procedures and may affect multiple subsystems.
+
+--------------------------------------------------------------------------------
+1. ADCS FAULT DURING MANEUVER (Tumbling Spacecraft)
+--------------------------------------------------------------------------------
+
+SYMPTOMS:
+- ADCS faulted flag = True
+- Spacecraft tumbling (5-10 deg/s rotation rates on all axes)
+- All ADCS telemetry stale EXCEPT 'faulted' flag
+- ADCS disabled automatically
+
+RECOVERY PROCEDURE:
+1. ADCS_POWER_CYCLE    (clears fault, resets tumble rates to zero)
+2. ADCS_ON             (re-enables ADCS in DETUMBLE mode)
+3. ADCS_DETUMBLE       (confirms detumble mode - should auto-stabilize)
+4. (Wait for rates to stabilize near 0 deg/s)
+5. ADCS_SUN_POINT      (restore power generation) or ADCS_NADIR (nominal ops)
+
+NOTES:
+- Power cycle clears tumble rates and fault flag
+- Must follow full recovery sequence to restore attitude control
+- Cannot skip DETUMBLE step - required for stabilization
+
+--------------------------------------------------------------------------------
+2. BATTERY DRAIN (Despite Working Solar Arrays)
+--------------------------------------------------------------------------------
+
+SYMPTOMS:
+- Battery A or B voltage decreasing rapidly
+- Battery A or B SOC dropping despite positive solar power
+- Other battery charging normally
+- Solar arrays generating power normally
+
+RECOVERY PROCEDURE:
+1. EPS_CROSS_CHARGE_ENABLE   (allows both arrays to charge both batteries)
+2. Monitor both battery voltages and SOC
+3. Healthy battery will support spacecraft while faulted battery isolates
+
+NOTES:
+- Cross-charging pools all solar power to charge healthy battery
+- Faulted battery will continue draining until EPS power cycle
+- EPS_POWER_CYCLE clears the drain anomaly if needed
+
+--------------------------------------------------------------------------------
+3. SOLAR ARRAY FAULT
+--------------------------------------------------------------------------------
+
+SYMPTOMS:
+- Solar Array A or B status = FAULTED
+- Zero current from faulted array (0.0 A)
+- Zero power from faulted array (0.0 W)
+- Other array generating power normally
+
+RECOVERY PROCEDURE:
+1. EPS_CROSS_CHARGE_ENABLE   (allows working array to charge both batteries)
+2. Monitor bus voltage and battery SOC
+3. May need to reduce power consumption if single array insufficient
+
+OPTIONAL (if cross-charge insufficient):
+4. EPS_MODE_LOW_POWER       (reduces spacecraft power consumption)
+5. Disable non-essential subsystems to conserve power
+
+NOTES:
+- Cross-charging allows single array to support entire spacecraft
+- Total power reduced to ~15W (one array max output)
+- May require power conservation measures depending on load
+- EPS_POWER_CYCLE will clear fault and restore array to NOMINAL status
+
+--------------------------------------------------------------------------------
+4. COMM FAULT (Complete Telemetry Loss)
+--------------------------------------------------------------------------------
+
+SYMPTOMS:
+- COMM faulted flag = True
+- All telemetry from ALL subsystems goes stale
+- COMM forced to RX mode only
+- Link status = NO_LINK
+
+RECOVERY PROCEDURE:
+1. COMM_POWER_CYCLE    (clears fault)
+2. COMM_TX_RX          (restore transmit and receive capability)
+3. (Telemetry should update immediately)
+
+NOTES:
+- This is the MOST CRITICAL fault - you lose all telemetry visibility
+- You must send commands "blind" without telemetry feedback
+- Power cycle is the ONLY recovery method
+- After recovery, verify all subsystems are still operational
+
+WARNING: During COMM fault, you are commanding without telemetry!
+- Cannot see if commands succeed or fail
+- Must use procedural memory and timing estimates
+- Critical to send COMM_POWER_CYCLE as first recovery action
+
+--------------------------------------------------------------------------------
+5. PROP VALVE STUCK OPEN (Propellant Leak)
+--------------------------------------------------------------------------------
+
+SYMPTOMS:
+- PROP faulted flag = True
+- Valve status = OPEN (cannot be closed)
+- Propellant mass decreasing continuously (~0.01 kg per cycle)
+- Total deltaV increasing (uncontrolled thrust)
+- All PROP telemetry stale EXCEPT 'faulted' flag
+
+RECOVERY PROCEDURE:
+1. PROP_POWER_CYCLE    (clears stuck valve fault, closes valve)
+2. PROP_STBY           (enter standby mode)
+3. PROP_ON             (re-enable propulsion)
+4. PROP_HEATER_ON      (restart catalyst bed heating)
+5. (Wait for catalyst ready: temp > 300°C)
+6. PROP_VALVE_CLOSE    (confirm valve closed)
+
+NOTES:
+- Valve stuck open causes rapid propellant loss
+- PROP_VALVE_CLOSE commands will be rejected until power cycle
+- Power cycle is required to mechanically reset valve actuator
+- Propellant lost during fault cannot be recovered
+- Check remaining propellant mass after recovery
+
+WARNING: Rapid propellant loss! Recovery must be prompt to preserve fuel.
+
+--------------------------------------------------------------------------------
+6. TCS HEATERS STUCK ON (Thermal Runaway)
+--------------------------------------------------------------------------------
+
+SYMPTOMS:
+- TCS faulted flag = True
+- All heaters forced ON (AVI, EPS, PROP)
+- Temperatures rising continuously on all subsystems
+- Heater OFF commands rejected
+- Power consumption elevated (~15W total for all heaters)
+
+RECOVERY PROCEDURE:
+1. TCS_POWER_CYCLE     (clears stuck heater fault, turns off all heaters)
+2. Monitor temperatures - should stabilize or decrease
+3. Re-enable heaters individually if needed for thermal control:
+   - TCS_HEATER_AVI_ON  (if avionics temp dropping too low)
+   - TCS_HEATER_EPS_ON  (if battery temp dropping too low)
+   - TCS_HEATER_PROP_ON (if propellant tank temp dropping too low)
+
+NOTES:
+- All heater OFF commands rejected until power cycle
+- Power cycle turns off ALL heaters simultaneously
+- Monitor temperatures closely - may trigger cautions/warnings
+- Temperatures will rise to WARNING levels if not recovered promptly
+- After recovery, may need to manually re-enable heaters for cold components
+
+WARNING: If temperatures reach CRITICAL levels:
+- AVI > 50°C: CPU damage risk
+- EPS > 50°C: Battery damage risk
+- Batteries < 0°C: Cannot charge (if over-cooled after recovery)
+
+================================================================================
+COMPOUND ANOMALY RESPONSE STRATEGY
+================================================================================
+
+When 2 compound anomalies occur simultaneously (off-nominal scenario):
+
+1. ASSESS THE SITUATION
+   - Check all subsystem fault flags
+   - Identify which 2 anomalies are active
+   - Note any telemetry that has gone stale
+
+2. PRIORITIZE RECOVERY ACTIONS
+   Priority 1: COMM fault (restores telemetry visibility)
+   Priority 2: Thermal runaway (prevents hardware damage)
+   Priority 3: ADCS tumbling (restores attitude control)
+   Priority 4: Power issues (battery drain, solar fault)
+   Priority 5: PROP leak (preserves remaining propellant)
+
+3. EXECUTE RECOVERY PROCEDURES
+   - Follow documented recovery procedure for each fault
+   - Complete first recovery before starting second
+   - Verify recovery success before proceeding
+
+4. VERIFY NOMINAL OPERATIONS RESTORED
+   - Check all fault flags cleared
+   - Verify telemetry updating normally
+   - Confirm spacecraft stable and controllable
+
+EXAMPLE SCENARIO: COMM Fault + Battery Drain
+
+Recommended sequence:
+1. COMM_POWER_CYCLE         (restores telemetry - CRITICAL FIRST)
+2. COMM_TX_RX               (verify telemetry updating)
+3. EPS_CROSS_CHARGE_ENABLE  (address battery drain)
+4. Monitor battery voltages and SOC to confirm recovery
+
+EXAMPLE SCENARIO: ADCS Tumble + PROP Leak
+
+Recommended sequence:
+1. PROP_POWER_CYCLE         (stop propellant loss immediately)
+2. PROP_STBY                (safe propulsion state)
+3. ADCS_POWER_CYCLE         (clear tumble)
+4. ADCS_ON                  (restore attitude control)
+5. ADCS_DETUMBLE            (stabilize spacecraft)
+6. ADCS_SUN_POINT           (restore power generation)
 
 ================================================================================
 END OF COMMAND REFERENCE
 ================================================================================
+

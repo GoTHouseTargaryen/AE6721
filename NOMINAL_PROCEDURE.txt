@@ -1,0 +1,272 @@
+================================================================================
+NOMINAL OPERATIONS PROCEDURE - 6U CubeSat Mission
+================================================================================
+Research Subject Reference - Follow steps in order during nominal experiments
+
+================================================================================
+SECTION 1: COMMUNICATIONS SETUP
+================================================================================
+
+STEP 1.1: Establish Downlink
+Command: COMM_TX_RX
+Verify: Link_Status = LOCK
+
+STEP 1.2: Verify Flight Computer
+Verify: CDH is ON and uptime incrementing
+Verify: CDH boot_count stable
+Verify: No CDH faults
+
+================================================================================
+SECTION 2: ATTITUDE CONTROL INITIALIZATION
+================================================================================
+
+STEP 2.1: Enable ADCS
+Command: ADCS_ON
+Verify: ADCS mode = DETUMBLE
+
+STEP 2.2: Wait for Detumble Completion
+Wait: Until roll, pitch, and yaw rates reach 0 ± 0.1 deg/s
+Verify: Angular rates stabilized
+Verify: ADCS enabled = True
+
+================================================================================
+SECTION 3: SOLAR ARRAY DEPLOYMENT
+================================================================================
+
+STEP 3.1: Deploy Solar Array A
+Command: EPS_DEPLOY_ARRAY_A
+Wait: 10 seconds
+Verify: Solar Array A status = DEPLOYED
+Verify: Array A voltage > 0V
+Verify: Array A current increasing
+
+STEP 3.2: Deploy Solar Array B
+Command: EPS_DEPLOY_ARRAY_B
+Wait: 10 seconds
+Verify: Solar Array B status = DEPLOYED
+Verify: Array B voltage > 0V
+Verify: Array B current increasing
+
+================================================================================
+SECTION 4: THERMAL CONTROL DEPLOYMENT
+================================================================================
+
+STEP 4.1: Deploy Radiator
+Command: TCS_DEPLOY_RADIATOR
+Wait: 10 seconds
+Verify: Radiator status = DEPLOYED
+
+STEP 4.2: Verify Thermal Stability
+Verify: AVI CPU temperature stable
+Verify: No thermal warnings
+Verify: Temperature within nominal range (20-40°C)
+
+================================================================================
+SECTION 5: NAVIGATION SENSOR INITIALIZATION
+================================================================================
+
+STEP 5.1: Enable Navigation Sensors
+Command: GPS_ON
+Command: STAR_TRACKER_ON
+Verify: GPS enabled = True
+Verify: Star Tracker enabled = True
+
+STEP 5.2: Wait for Star Tracker Acquisition
+Wait: 180 seconds (3 minutes)
+Verify: Star Tracker attitude_valid = True
+Verify: Star Tracker attitude error < 0.1°
+
+STEP 5.3: Wait for GPS Lock
+Wait: 180 seconds (3 minutes) while GPS acquires satellites
+Verify: GPS satellites ≥ 5
+Verify: GPS position_valid = True
+Verify: GPS PDOP < 3.0 (good position accuracy)
+
+================================================================================
+SECTION 6: SUN POINTING MODE
+================================================================================
+
+STEP 6.1: Command Sun Pointing
+Command: ADCS_SUN_POINT
+Verify: ADCS mode = SUN_POINT
+
+STEP 6.2: Wait for Sun Acquisition
+Wait: Until sun_angle approaches 0°
+Verify: Sun angle < 5°
+Verify: Solar power increasing
+Verify: Battery A and B charging
+
+================================================================================
+SECTION 7: DESATURATION MANEUVER PREPARATION
+================================================================================
+
+STEP 7.1: Enable Propulsion System (5V Standby)
+Command: PROP_STBY
+Verify: PROP standby_mode = True
+Verify: PROP telemetry flowing (not stale)
+Verify: Tank pressure nominal (~20 bar)
+
+STEP 7.2: Activate Propellant Heater
+Command: PROP_HEATER_ON
+Verify: PROP heater_status = ON
+Verify: Tank temperature rising
+
+STEP 7.3: Enable Full Propulsion Power
+Command: PROP_VBAT
+Verify: PROP voltage = 28V
+Verify: PROP current increasing
+
+STEP 7.4: Activate Catalyst Bed Heater
+Command: PROP_CATALYST_HEATER_ON
+Verify: Catalyst heater_status = ON
+Verify: Catalyst temperature rising
+
+STEP 7.5: Verify Power Budget
+Verify: EPS total_power_in > total_power_out (positive power)
+Verify: Battery A and B voltage stable or increasing
+Verify: No EPS warnings
+
+STEP 7.6: Wait for Catalyst Bed Ready
+Wait: Until catalyst_temp > 300°C
+Verify: Catalyst bed at operating temperature
+Note: This ensures efficient propellant decomposition
+
+================================================================================
+SECTION 8: REACTION WHEEL DESATURATION
+================================================================================
+
+STEP 8.1: Command Desaturation Maneuver
+Command: ADCS_DESAT
+Verify: ADCS mode = DESAT
+Verify: PROP valve_status = OPEN (propulsion active)
+
+STEP 8.2: Monitor Desaturation Progress
+Verify: Delta-V increasing (momentum being transferred)
+Verify: Propellant mass decreasing
+Verify: Reaction wheel RPMs decreasing (all 3 wheels)
+Wait: Until wheel speeds < 1000 RPM
+
+STEP 8.3: Complete Desaturation
+Verify: Wheels desaturated
+Verify: PROP valve_status = CLOSED (automatic)
+Verify: ADCS returns to previous mode
+
+================================================================================
+SECTION 9: ORBIT RAISE MANEUVER PREPARATION
+================================================================================
+
+STEP 9.1: Command Target Attitude
+Command: ADCS_GO_TO 50 -50 100
+Note: Roll=50°, Pitch=-50°, Yaw=100° (thrust vector alignment)
+
+STEP 9.2: Monitor Attitude Slew
+Verify: Yaw, pitch, roll rates ≠ 0 (actively slewing)
+Verify: Yaw, pitch, roll angles moving toward target
+Verify: Reaction wheel RPMs changing (active control)
+
+STEP 9.3: Verify Power Budget During Slew
+Verify: EPS total_power_in > total_power_out
+Verify: Sufficient battery capacity for maneuver
+Verify: No power warnings
+
+STEP 9.4: Wait for Attitude Acquisition
+Wait: Until attitude reached (rates ~ 0, angles at target ±1°)
+Verify: Roll = 50° ± 1°
+Verify: Pitch = -50° ± 1°
+Verify: Yaw = 100° ± 1°
+
+STEP 9.5: Pre-Burn Checks
+Verify: PROP catalyst_temp > 300°C
+Verify: PROP standby_mode = True (system ready)
+Verify: PROP valve_status = CLOSED
+Verify: EPS total_power positive or sufficient battery margin
+Verify: Current orbital altitude ~ 520 km
+
+================================================================================
+SECTION 10: ORBIT RAISE BURN EXECUTION
+================================================================================
+
+STEP 10.1: Open Loop Thrust Firing
+Command: PROP_VALVE_OPEN
+Verify: Valve status = OPEN
+Verify: Propellant mass decreasing
+Verify: Delta-V increasing
+
+STEP 10.2: Monitor Burn Progress
+Watch: Propellant mass decreasing
+Target: Continue until propellant_mass = 0.4 kg
+Verify: Orbital altitude increasing
+Verify: ADCS maintaining attitude
+
+STEP 10.3: Terminate Burn at Target Mass
+When: Propellant mass reaches 0.4 kg
+Command: PROP_VALVE_CLOSE
+Verify: Valve status = CLOSED
+Verify: Propellant mass stopped decreasing
+
+STEP 10.4: Verify Orbit Change
+Verify: Orbital altitude changed from ~520 km
+Verify: Orbital velocity changed
+Note: Record new altitude for mission log
+
+================================================================================
+SECTION 11: POST-BURN RECOVERY
+================================================================================
+
+STEP 11.1: Return to Sun Pointing
+Command: ADCS_SUN_POINT
+Verify: ADCS mode = SUN_POINT
+Verify: Spacecraft reorienting to sun
+Wait: Until sun_angle < 5°
+
+================================================================================
+SECTION 12: PROPULSION SYSTEM SHUTDOWN
+================================================================================
+
+STEP 12.1: Ensure Valve Closed
+Command: PROP_VALVE_CLOSE
+Verify: Valve status = CLOSED (redundant safety check)
+
+STEP 12.2: Disable Propellant Heater
+Command: PROP_HEATER_OFF
+Verify: Heater status = OFF
+
+STEP 12.3: Disable Catalyst Heater
+Command: PROP_CATALYST_HEATER_OFF
+Verify: Catalyst heater status = OFF
+Verify: Catalyst bed temperature decreasing
+
+STEP 12.4: Power Down Propulsion System
+Command: PROP_OFF
+Verify: PROP standby_mode = False
+Verify: PROP telemetry goes stale
+Verify: System fully shut down
+
+================================================================================
+SECTION 13: FINAL VERIFICATION
+================================================================================
+
+STEP 13.1: Verify Spacecraft State
+Verify: ADCS in SUN_POINT mode
+Verify: Solar arrays deployed and charging
+Verify: Radiator deployed
+Verify: GPS and Star Tracker operational
+Verify: COMM in TX_RX mode
+Verify: PROP system safely shut down
+Verify: No warnings or cautions active
+Verify: EPS power positive
+
+STEP 13.2: Mission Complete
+Note: Nominal operations procedure complete
+Note: Spacecraft in stable power-positive configuration
+Note: Ready for science operations or standby
+
+================================================================================
+END OF NOMINAL PROCEDURE
+================================================================================
+
+Estimated Completion Time: 15-20 minutes (depends on sensor acquisition times)
+Critical Steps: Catalyst bed warmup (Step 7.6), Attitude acquisition (Step 9.4)
+Safety Notes: Always verify power positive before major maneuvers
+             Always verify catalyst temp before propulsion operations
+             Monitor propellant mass during burns
