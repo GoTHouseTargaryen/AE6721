@@ -101,7 +101,7 @@ SECTION 7: DESATURATION MANEUVER PREPARATION
 ================================================================================
 
 STEP 7.1: Enable Propulsion System (5V Standby)
-Command: PROP_STBY
+Command: PROP_STANDBY
 Verify: PROP standby_mode = True
 Verify: PROP telemetry flowing (not stale)
 Verify: Tank pressure nominal (~20 bar)
@@ -112,21 +112,18 @@ Verify: PROP heater_status = ON
 Verify: Tank temperature rising
 
 STEP 7.3: Enable Full Propulsion Power
-Command: PROP_VBAT
+Command: PROP_ON
 Verify: PROP voltage = 28V
 Verify: PROP current increasing
 
-STEP 7.4: Activate Catalyst Bed Heater
-Command: PROP_CATALYST_HEATER_ON
-Verify: Catalyst heater_status = ON
-Verify: Catalyst temperature rising
-
-STEP 7.5: Verify Power Budget
+STEP 7.4: Verify Power Budget and Battery Status
 Verify: EPS total_power_in > total_power_out (positive power)
-Verify: Battery A and B voltage stable or increasing
+Verify: Battery A and B SOC stable or increasing (charging)
+Verify: Battery A SOC > 25% (enough capacity to continue)
+Verify: Battery B SOC > 25% (enough capacity to continue)
 Verify: No EPS warnings
 
-STEP 7.6: Wait for Catalyst Bed Ready
+STEP 7.5: Wait for Catalyst Bed Ready
 Wait: Until catalyst_temp > 300°C
 Verify: Catalyst bed at operating temperature
 Note: This ensures efficient propellant decomposition
@@ -166,7 +163,8 @@ Verify: Reaction wheel RPMs changing (active control)
 
 STEP 9.3: Verify Power Budget During Slew
 Verify: EPS total_power_in > total_power_out
-Verify: Sufficient battery capacity for maneuver
+Verify: Battery A SOC > 25% (sufficient capacity for maneuver)
+Verify: Battery B SOC > 25% (sufficient capacity for maneuver)
 Verify: No power warnings
 
 STEP 9.4: Wait for Attitude Acquisition
@@ -179,7 +177,7 @@ STEP 9.5: Pre-Burn Checks
 Verify: PROP catalyst_temp > 300°C
 Verify: PROP standby_mode = True (system ready)
 Verify: PROP valve_status = CLOSED
-Verify: EPS total_power positive or sufficient battery margin
+Verify: EPS total_power positive or battery SOC > 25%
 Verify: Current orbital altitude ~ 520 km
 
 ================================================================================
@@ -231,12 +229,7 @@ STEP 12.2: Disable Propellant Heater
 Command: PROP_HEATER_OFF
 Verify: Heater status = OFF
 
-STEP 12.3: Disable Catalyst Heater
-Command: PROP_CATALYST_HEATER_OFF
-Verify: Catalyst heater status = OFF
-Verify: Catalyst bed temperature decreasing
-
-STEP 12.4: Power Down Propulsion System
+STEP 12.3: Power Down Propulsion System
 Command: PROP_OFF
 Verify: PROP standby_mode = False
 Verify: PROP telemetry goes stale
