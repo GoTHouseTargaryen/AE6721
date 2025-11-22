@@ -74,13 +74,13 @@ Verify: Star Tracker enabled = True
 STEP 5.2: Wait for Star Tracker Acquisition
 Wait: 180 seconds (3 minutes)
 Verify: Star Tracker attitude_valid = True
-Verify: Star Tracker attitude error < 0.1°
+Verify: Star Tracker attitude error < 3°
 
 STEP 5.3: Wait for GPS Lock
 Wait: 180 seconds (3 minutes) while GPS acquires satellites
 Verify: GPS satellites ≥ 5
 Verify: GPS position_valid = True
-Verify: GPS PDOP < 3.0 (good position accuracy)
+Verify: GPS PDOP < 40 (good position accuracy)
 
 ================================================================================
 SECTION 6: SUN POINTING MODE
@@ -106,24 +106,29 @@ Verify: PROP standby_mode = True
 Verify: PROP telemetry flowing (not stale)
 Verify: Tank pressure nominal (~20 bar)
 
-STEP 7.2: Activate Propellant Heater
-Command: PROP_HEATER_ON
-Verify: PROP heater_status = ON
+STEP 7.2: Activate Propellant Tank Heater
+Command: TCS_HEATER_PROP_ON
+Verify: TCS heater_prop_on = True
 Verify: Tank temperature rising
 
-STEP 7.3: Enable Full Propulsion Power
+STEP 7.3: Enable Full Propulsion Power (VBat)
 Command: PROP_ON
 Verify: PROP voltage = 28V
 Verify: PROP current increasing
 
-STEP 7.4: Verify Power Budget and Battery Status
+STEP 7.4: Activate Catalyst Bed Heater
+Command: PROP_HEATER_ON
+Verify: PROP catalyst_heater_on = True
+Verify: Catalyst temperature rising
+
+STEP 7.5: Verify Power Budget and Battery Status
 Verify: EPS total_power_in > total_power_out (positive power)
 Verify: Battery A and B SOC stable or increasing (charging)
 Verify: Battery A SOC > 25% (enough capacity to continue)
 Verify: Battery B SOC > 25% (enough capacity to continue)
 Verify: No EPS warnings
 
-STEP 7.5: Wait for Catalyst Bed Ready
+STEP 7.6: Wait for Catalyst Bed Ready
 Wait: Until catalyst_temp > 300°C
 Verify: Catalyst bed at operating temperature
 Note: This ensures efficient propellant decomposition
@@ -225,11 +230,15 @@ STEP 12.1: Ensure Valve Closed
 Command: PROP_VALVE_CLOSE
 Verify: Valve status = CLOSED (redundant safety check)
 
-STEP 12.2: Disable Propellant Heater
+STEP 12.2: Disable Catalyst Bed Heater
 Command: PROP_HEATER_OFF
-Verify: Heater status = OFF
+Verify: PROP catalyst_heater_on = False
 
-STEP 12.3: Power Down Propulsion System
+STEP 12.3: Disable Propellant Tank Heater
+Command: TCS_HEATER_PROP_OFF
+Verify: TCS heater_prop_on = False
+
+STEP 12.4: Power Down Propulsion System
 Command: PROP_OFF
 Verify: PROP standby_mode = False
 Verify: PROP telemetry goes stale

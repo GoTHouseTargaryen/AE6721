@@ -969,13 +969,27 @@ class SpacecraftSimulator:
             self.eps_state['bus_current'] = base_load / self.eps_state['bus_voltage']
             
             # Battery temperatures
+            # Batteries have internal heat generation and thermal mass
+            # They cool slowly in eclipse but don't reach full ambient temperature
             ambient = -20.0 if self.orbit_state['eclipse'] else 10.0
             heat_from_charging_a = abs(self.eps_state['battery_a_current']) * 0.5
             heat_from_charging_b = abs(self.eps_state['battery_b_current']) * 0.5
-            temp_delta_a = (ambient + heat_from_charging_a - self.eps_state['battery_a_temp']) * 0.05
-            temp_delta_b = (ambient + heat_from_charging_b - self.eps_state['battery_b_temp']) * 0.05
+            
+            # Batteries have thermal mass and internal heat, so they stabilize warmer than ambient
+            # In eclipse: stabilize around 0°C (not -20°C ambient)
+            # In sun: stabilize around 10-20°C depending on charging
+            target_temp_a = ambient + heat_from_charging_a + 15.0  # Thermal mass offset
+            target_temp_b = ambient + heat_from_charging_b + 15.0
+            
+            # Slow thermal response (large thermal mass)
+            temp_delta_a = (target_temp_a - self.eps_state['battery_a_temp']) * 0.03
+            temp_delta_b = (target_temp_b - self.eps_state['battery_b_temp']) * 0.03
             self.eps_state['battery_a_temp'] += temp_delta_a
             self.eps_state['battery_b_temp'] += temp_delta_b
+            
+            # Enforce physical limits (batteries won't go below -10°C or above 50°C)
+            self.eps_state['battery_a_temp'] = max(-10.0, min(50.0, self.eps_state['battery_a_temp']))
+            self.eps_state['battery_b_temp'] = max(-10.0, min(50.0, self.eps_state['battery_b_temp']))
             
             # Solar panel temperatures
             if self.orbit_state['eclipse']:
