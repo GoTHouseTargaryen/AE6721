@@ -517,10 +517,13 @@ class SpacecraftSimulator:
     def _apply_delta_v_to_orbit(self, delta_v_magnitude, direction_angles):
         """Apply delta-V to orbital parameters using proper coordinate transformations
         
-        Reference Frame:
-        - Spacecraft body frame at launch: +X axis aligned with Vernal Equinox (ECI frame)
-        - Body axes: +X forward (thrust), +Y starboard, +Z nadir
-        - Attitude angles (roll, pitch, yaw) represent rotation from initial alignment
+        Reference Frame (Spacecraft Body Axes):
+        - Roll axis (+X): Points in the direction of the velocity vector (prograde)
+        - Pitch axis (+Y): Points perpendicular to the velocity vector (radial outward)
+        - Yaw axis (+Z): Points to zenith (away from Earth)
+        
+        Thrust is applied along the body +X axis (roll/velocity direction)
+        Attitude angles (roll, pitch, yaw) represent rotation from nominal orbital alignment
         
         Args:
             delta_v_magnitude: Delta-V magnitude in m/s
@@ -534,87 +537,56 @@ class SpacecraftSimulator:
         r = (r_earth + self.orbital_altitude) * 1000  # Convert to meters
         v_orbital = self.orbit_state['velocity'] * 1000  # Convert km/s to m/s
         
-        # COORDINATE TRANSFORMATION: Body frame → ECI frame
-        # At launch, body +X was aligned with vernal equinox (ECI +X)
-        # Current attitude represents rotation from that initial alignment
+        # COORDINATE TRANSFORMATION: Body frame → Orbital frame
+        # Body frame is aligned with orbital motion:
+        # +X (roll) = velocity direction (prograde/tangential)
+        # +Y (pitch) = radial direction (perpendicular to velocity, away from Earth)
+        # +Z (yaw) = zenith (normal to orbital plane, away from Earth)
+        #
+        # Nominal attitude (0,0,0) means:
+        # - Thrust along velocity vector (tangential burn)
+        # - Pitch rotation points thrust radially
+        # - Yaw rotation points thrust normal to orbit plane
+        
         roll_rad = math.radians(direction_angles['roll'])
         pitch_rad = math.radians(direction_angles['pitch'])
         yaw_rad = math.radians(direction_angles['yaw'])
         
-        # Thrust is along body +X axis. Transform to ECI frame using rotation matrices.
-        # Rotation sequence: Yaw (Z) → Pitch (Y) → Roll (X)
-        # This gives us thrust direction in ECI frame
-        
-        # Thrust vector in body frame (along +X)
+        # Thrust is along body +X axis (velocity direction in nominal attitude)
+        # Apply rotations to determine actual thrust direction
         thrust_body = [delta_v_magnitude, 0.0, 0.0]
         
-        # Apply yaw rotation (about Z)
-        cy, sy = math.cos(yaw_rad), math.sin(yaw_rad)
-        thrust_after_yaw = [
-            cy * thrust_body[0] - sy * thrust_body[1],
-            sy * thrust_body[0] + cy * thrust_body[1],
-            thrust_body[2]
+        # Apply roll rotation (about velocity/X axis)
+        cr, sr = math.cos(roll_rad), math.sin(roll_rad)
+        thrust_after_roll = [
+            thrust_body[0],
+            cr * thrust_body[1] - sr * thrust_body[2],
+            sr * thrust_body[1] + cr * thrust_body[2]
         ]
         
-        # Apply pitch rotation (about Y)
+        # Apply pitch rotation (about radial/Y axis) - rotates in velocity-zenith plane
         cp, sp = math.cos(pitch_rad), math.sin(pitch_rad)
         thrust_after_pitch = [
-            cp * thrust_after_yaw[0] + sp * thrust_after_yaw[2],
-            thrust_after_yaw[1],
-            -sp * thrust_after_yaw[0] + cp * thrust_after_yaw[2]
+            cp * thrust_after_roll[0] + sp * thrust_after_roll[2],
+            thrust_after_roll[1],
+            -sp * thrust_after_roll[0] + cp * thrust_after_roll[2]
         ]
         
-        # Apply roll rotation (about X)
-        cr, sr = math.cos(roll_rad), math.sin(roll_rad)
-        thrust_eci = [
-            thrust_after_pitch[0],
-            cr * thrust_after_pitch[1] - sr * thrust_after_pitch[2],
-            sr * thrust_after_pitch[1] + cr * thrust_after_pitch[2]
+        # Apply yaw rotation (about zenith/Z axis) - rotates in velocity-radial plane
+        cy, sy = math.cos(yaw_rad), math.sin(yaw_rad)
+        thrust_orbital = [
+            cy * thrust_after_pitch[0] - sy * thrust_after_pitch[1],
+            sy * thrust_after_pitch[0] + cy * thrust_after_pitch[1],
+            thrust_after_pitch[2]
         ]
         
-        # For circular orbit approximation, decompose delta-V into orbital frame:
-        # Radial (toward/away from Earth), Tangential (along velocity), Normal (perpendicular to orbit plane)
-        # Assume spacecraft is at equator (latitude=0) with velocity in ECI +Y direction for simplicity
-        # This is a simplification - full orbital mechanics would track true anomaly and RAAN
-        
-        # Position vector (assume equatorial orbit, spacecraft at longitude from state)
-        lon_rad = math.radians(self.orbit_state['longitude'])
-        pos_eci = [
-            r * math.cos(lon_rad),
-            r * math.sin(lon_rad),
-            0.0  # Equatorial orbit assumption
-        ]
-        
-        # Velocity vector (perpendicular to position for circular orbit)
-        vel_eci = [
-            -v_orbital * math.sin(lon_rad),
-            v_orbital * math.cos(lon_rad),
-            0.0
-        ]
-        
-        # Decompose thrust into radial, tangential, normal components
-        # Radial: component along position vector
-        pos_mag = math.sqrt(sum(p**2 for p in pos_eci))
-        pos_unit = [p / pos_mag for p in pos_eci]
-        dv_radial = sum(thrust_eci[i] * pos_unit[i] for i in range(3))
-        
-        # Tangential: component along velocity vector
-        vel_mag = math.sqrt(sum(v**2 for v in vel_eci))
-        vel_unit = [v / vel_mag for v in vel_eci]
-        dv_tangential = sum(thrust_eci[i] * vel_unit[i] for i in range(3))
-        
-        # Normal: component perpendicular to orbit plane (cross product of radial and tangential)
-        normal_unit = [
-            pos_unit[1] * vel_unit[2] - pos_unit[2] * vel_unit[1],
-            pos_unit[2] * vel_unit[0] - pos_unit[0] * vel_unit[2],
-            pos_unit[0] * vel_unit[1] - pos_unit[1] * vel_unit[0]
-        ]
-        normal_mag = math.sqrt(sum(n**2 for n in normal_unit))
-        if normal_mag > 0:
-            normal_unit = [n / normal_mag for n in normal_unit]
-            dv_normal = sum(thrust_eci[i] * normal_unit[i] for i in range(3))
-        else:
-            dv_normal = 0.0
+        # thrust_orbital is now in orbital frame:
+        # [0] = tangential component (along velocity)
+        # [1] = radial component (toward/away from Earth)
+        # [2] = normal component (perpendicular to orbital plane)
+        dv_tangential = thrust_orbital[0]
+        dv_radial = thrust_orbital[1]
+        dv_normal = thrust_orbital[2]
         
         # Apply delta-V components to orbital velocity
         v_new = v_orbital + dv_tangential
@@ -1058,17 +1030,17 @@ class SpacecraftSimulator:
                     yaw_error = (yaw_error + 180) % 360 - 180
                     
                     # PD controller for attitude control (more aggressive for desat)
-                    Kp = 0.08  # Higher proportional gain for faster slewing
+                    Kp = 0.16  # Higher proportional gain for faster slewing (doubled for 2x speed)
                     Kd = 0.8   # Derivative gain (damping)
                     
                     target_roll_rate = Kp * roll_error - Kd * self.adcs_state['roll_rate']
                     target_pitch_rate = Kp * pitch_error - Kd * self.adcs_state['pitch_rate']
                     target_yaw_rate = Kp * yaw_error - Kd * self.adcs_state['yaw_rate']
                     
-                    # Update rates towards target
-                    self.adcs_state['roll_rate'] += (target_roll_rate - self.adcs_state['roll_rate']) * 0.1
-                    self.adcs_state['pitch_rate'] += (target_pitch_rate - self.adcs_state['pitch_rate']) * 0.1
-                    self.adcs_state['yaw_rate'] += (target_yaw_rate - self.adcs_state['yaw_rate']) * 0.1
+                    # Update rates towards target (doubled for 2x speed)
+                    self.adcs_state['roll_rate'] += (target_roll_rate - self.adcs_state['roll_rate']) * 0.2
+                    self.adcs_state['pitch_rate'] += (target_pitch_rate - self.adcs_state['pitch_rate']) * 0.2
+                    self.adcs_state['yaw_rate'] += (target_yaw_rate - self.adcs_state['yaw_rate']) * 0.2
                     
                     # Update angles
                     self.adcs_state['roll'] += self.adcs_state['roll_rate']
@@ -1092,10 +1064,10 @@ class SpacecraftSimulator:
                     target_pitch_rate = -Kd * self.adcs_state['pitch_rate']
                     target_yaw_rate = -Kd * self.adcs_state['yaw_rate']
                     
-                    # Update rates towards target (reaction wheels provide torque)
-                    self.adcs_state['roll_rate'] += (target_roll_rate - self.adcs_state['roll_rate']) * 0.1
-                    self.adcs_state['pitch_rate'] += (target_pitch_rate - self.adcs_state['pitch_rate']) * 0.1
-                    self.adcs_state['yaw_rate'] += (target_yaw_rate - self.adcs_state['yaw_rate']) * 0.1
+                    # Update rates towards target (reaction wheels provide torque) (doubled for 2x speed)
+                    self.adcs_state['roll_rate'] += (target_roll_rate - self.adcs_state['roll_rate']) * 0.2
+                    self.adcs_state['pitch_rate'] += (target_pitch_rate - self.adcs_state['pitch_rate']) * 0.2
+                    self.adcs_state['yaw_rate'] += (target_yaw_rate - self.adcs_state['yaw_rate']) * 0.2
                     
                     # Update angles
                     self.adcs_state['roll'] += self.adcs_state['roll_rate']
@@ -1120,17 +1092,17 @@ class SpacecraftSimulator:
                     yaw_error = (yaw_error + 180) % 360 - 180
                     
                     # PD controller: rate = -Kp*error - Kd*current_rate
-                    Kp = 0.05  # Proportional gain
+                    Kp = 0.10  # Proportional gain (doubled for 2x speed)
                     Kd = 0.8   # Derivative gain (damping)
                     
                     target_roll_rate = Kp * roll_error - Kd * self.adcs_state['roll_rate']
                     target_pitch_rate = Kp * pitch_error - Kd * self.adcs_state['pitch_rate']
                     target_yaw_rate = Kp * yaw_error - Kd * self.adcs_state['yaw_rate']
                     
-                    # Update rates towards target (RWS provides torque)
-                    self.adcs_state['roll_rate'] += (target_roll_rate - self.adcs_state['roll_rate']) * 0.1
-                    self.adcs_state['pitch_rate'] += (target_pitch_rate - self.adcs_state['pitch_rate']) * 0.1
-                    self.adcs_state['yaw_rate'] += (target_yaw_rate - self.adcs_state['yaw_rate']) * 0.1
+                    # Update rates towards target (RWS provides torque) (doubled for 2x speed)
+                    self.adcs_state['roll_rate'] += (target_roll_rate - self.adcs_state['roll_rate']) * 0.2
+                    self.adcs_state['pitch_rate'] += (target_pitch_rate - self.adcs_state['pitch_rate']) * 0.2
+                    self.adcs_state['yaw_rate'] += (target_yaw_rate - self.adcs_state['yaw_rate']) * 0.2
                     
                     # Update angles
                     self.adcs_state['roll'] += self.adcs_state['roll_rate']
@@ -1155,7 +1127,7 @@ class SpacecraftSimulator:
                     pitch_error = (pitch_error + 180) % 360 - 180
                     yaw_error = (yaw_error + 180) % 360 - 180
                     
-                    Kp = 0.05
+                    Kp = 0.10  # Doubled for 2x speed
                     Kd = 0.8
                     
                     # Nadir pointing requires compensating for orbital motion
@@ -1163,9 +1135,9 @@ class SpacecraftSimulator:
                     target_pitch_rate = Kp * pitch_error - Kd * (self.adcs_state['pitch_rate'] - orbital_rate/60.0)
                     target_yaw_rate = Kp * yaw_error - Kd * self.adcs_state['yaw_rate']
                     
-                    self.adcs_state['roll_rate'] += (target_roll_rate - self.adcs_state['roll_rate']) * 0.1
-                    self.adcs_state['pitch_rate'] += (target_pitch_rate - self.adcs_state['pitch_rate']) * 0.1
-                    self.adcs_state['yaw_rate'] += (target_yaw_rate - self.adcs_state['yaw_rate']) * 0.1
+                    self.adcs_state['roll_rate'] += (target_roll_rate - self.adcs_state['roll_rate']) * 0.2  # Doubled for 2x speed
+                    self.adcs_state['pitch_rate'] += (target_pitch_rate - self.adcs_state['pitch_rate']) * 0.2
+                    self.adcs_state['yaw_rate'] += (target_yaw_rate - self.adcs_state['yaw_rate']) * 0.2
                     
                     self.adcs_state['roll'] += self.adcs_state['roll_rate']
                     self.adcs_state['pitch'] += self.adcs_state['pitch_rate']
@@ -1201,17 +1173,17 @@ class SpacecraftSimulator:
                     yaw_error = (yaw_error + 180) % 360 - 180
                     
                     # PD controller for fine control
-                    Kp = 0.05  # Proportional gain
+                    Kp = 0.10  # Proportional gain (doubled for 2x speed)
                     Kd = 0.8   # Derivative gain (damping)
                     
                     target_roll_rate = Kp * roll_error - Kd * self.adcs_state['roll_rate']
                     target_pitch_rate = Kp * pitch_error - Kd * self.adcs_state['pitch_rate']
                     target_yaw_rate = Kp * yaw_error - Kd * self.adcs_state['yaw_rate']
                     
-                    # Update rates towards target
-                    self.adcs_state['roll_rate'] += (target_roll_rate - self.adcs_state['roll_rate']) * 0.1
-                    self.adcs_state['pitch_rate'] += (target_pitch_rate - self.adcs_state['pitch_rate']) * 0.1
-                    self.adcs_state['yaw_rate'] += (target_yaw_rate - self.adcs_state['yaw_rate']) * 0.1
+                    # Update rates towards target (doubled for 2x speed)
+                    self.adcs_state['roll_rate'] += (target_roll_rate - self.adcs_state['roll_rate']) * 0.2
+                    self.adcs_state['pitch_rate'] += (target_pitch_rate - self.adcs_state['pitch_rate']) * 0.2
+                    self.adcs_state['yaw_rate'] += (target_yaw_rate - self.adcs_state['yaw_rate']) * 0.2
                     
                     # Update angles
                     self.adcs_state['roll'] += self.adcs_state['roll_rate']
@@ -1261,7 +1233,7 @@ class SpacecraftSimulator:
                 if mode == 'DESAT':
                     # DESAT mode: Wheels provide torque for slewing to desaturation attitude
                     # Similar to pointing modes but for desaturation target
-                    control_gain = 10.0  # RPM per deg/s
+                    control_gain = 20.0  # RPM per deg/s (doubled for 2x speed)
                     
                     rate_threshold = 0.001  # deg/s
                     
@@ -1300,7 +1272,7 @@ class SpacecraftSimulator:
                 
                 elif mode == 'DETUMBLE':
                     # DETUMBLE: Wheels counter body rates to drive them to zero
-                    control_gain = 10.0  # RPM per deg/s - allows 360° rotation without saturation
+                    control_gain = 20.0  # RPM per deg/s (doubled for 2x speed)
                     
                     # Only apply control if rates are significant (prevents drift accumulation)
                     rate_threshold = 0.001  # deg/s
@@ -1346,7 +1318,7 @@ class SpacecraftSimulator:
                     
                 elif mode in ['SUN_POINT', 'NADIR', 'INERTIAL', 'FINE_HOLD']:
                     # POINTING MODES: Wheels maintain attitude, compensate for disturbances
-                    control_gain = 10.0  # RPM per deg/s - allows 360° rotation without saturation
+                    control_gain = 20.0  # RPM per deg/s (doubled for 2x speed)
                     
                     # Only apply control if rates are significant (prevents drift accumulation)
                     rate_threshold = 0.001  # deg/s
@@ -1527,6 +1499,18 @@ class SpacecraftSimulator:
                             
                             # Accumulate total delta-V for mission tracking
                             self.prop_state['total_delta_v'] += delta_v_per_cycle
+                            
+                            # Apply delta-V to orbital parameters
+                            # Thruster firing changes spacecraft velocity, affecting orbit
+                            # Direction depends on spacecraft attitude and thruster orientation
+                            self._apply_delta_v_to_orbit(
+                                delta_v_per_cycle,
+                                {
+                                    'roll': self.adcs_state['roll'],
+                                    'pitch': self.adcs_state['pitch'],
+                                    'yaw': self.adcs_state['yaw']
+                                }
+                            )
                             
                             # Log thruster firing event (throttled)
                             if not hasattr(self, '_last_thruster_evr_time'):
