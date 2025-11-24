@@ -104,7 +104,7 @@ STEP 7.1: Enable Propulsion System (5V Standby)
 Command: PROP_STANDBY
 Verify: PROP standby_mode = True
 Verify: PROP telemetry flowing (not stale)
-Verify: Tank pressure nominal (~20 bar)
+Verify: Tank pressure nominal (~200 PSI)
 
 STEP 7.2: Activate Propellant Tank Heater
 Command: TCS_HEATER_PROP_ON
@@ -113,11 +113,11 @@ Verify: Tank temperature rising
 
 STEP 7.3: Enable Full Propulsion Power (VBat)
 Command: PROP_ON
-Verify: PROP voltage = 28V
-Verify: PROP current increasing
+Verify: PROP voltage = 12V
 
 STEP 7.4: Activate Catalyst Bed Heater
 Command: PROP_HEATER_ON
+Verify: PROP current increased
 Verify: PROP catalyst_heater_on = True
 Verify: Catalyst temperature rising
 
@@ -207,7 +207,7 @@ Command: PROP_VALVE_CLOSE
 Verify: Valve status = CLOSED
 Verify: Propellant mass stopped decreasing
 
-STEP 10.4: Verify Orbit Change
+STEP 10.4: Verify Orbit Change (Will not change in this simulation)
 Verify: Orbital altitude changed from ~520 km
 Verify: Orbital velocity changed
 Note: Record new altitude for mission log
