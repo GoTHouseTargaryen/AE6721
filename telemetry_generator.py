@@ -1258,7 +1258,47 @@ class SpacecraftSimulator:
                 # Wheel acceleration proportional to body rates (torque = I * alpha)
                 # Negative sign: wheel spins opposite to spacecraft rotation
                 
-                if mode == 'DETUMBLE':
+                if mode == 'DESAT':
+                    # DESAT mode: Wheels provide torque for slewing to desaturation attitude
+                    # Similar to pointing modes but for desaturation target
+                    control_gain = 10.0  # RPM per deg/s
+                    
+                    rate_threshold = 0.001  # deg/s
+                    
+                    # Compute desired torque in body axes
+                    torque_x = -self.adcs_state['roll_rate'] * control_gain if abs(self.adcs_state['roll_rate']) > rate_threshold else 0.0
+                    torque_y = -self.adcs_state['pitch_rate'] * control_gain if abs(self.adcs_state['pitch_rate']) > rate_threshold else 0.0
+                    torque_z = -self.adcs_state['yaw_rate'] * control_gain if abs(self.adcs_state['yaw_rate']) > rate_threshold else 0.0
+                    
+                    # Map body torques to wheel speeds using skewed configuration
+                    w1_contribution = 0.707 * torque_x + 0.500 * torque_y + 0.500 * torque_z
+                    w2_contribution = 0.500 * torque_x + 0.707 * torque_y + 0.500 * torque_z
+                    w3_contribution = 0.500 * torque_x + 0.500 * torque_y + 0.707 * torque_z
+                    
+                    # Check saturation and redistribute if needed
+                    sat_1 = self.adcs_state['rws_saturated_x']
+                    sat_2 = self.adcs_state['rws_saturated_y']
+                    sat_3 = self.adcs_state['rws_saturated_z']
+                    
+                    if sat_1:
+                        w2_contribution += 0.5 * w1_contribution
+                        w3_contribution += 0.5 * w1_contribution
+                        w1_contribution = 0.0
+                    if sat_2:
+                        w1_contribution += 0.5 * w2_contribution
+                        w3_contribution += 0.5 * w2_contribution
+                        w2_contribution = 0.0
+                    if sat_3:
+                        w1_contribution += 0.5 * w3_contribution
+                        w2_contribution += 0.5 * w3_contribution
+                        w3_contribution = 0.0
+                    
+                    # Apply to wheels
+                    self.adcs_state['rws_rpm_x'] += w1_contribution
+                    self.adcs_state['rws_rpm_y'] += w2_contribution
+                    self.adcs_state['rws_rpm_z'] += w3_contribution
+                
+                elif mode == 'DETUMBLE':
                     # DETUMBLE: Wheels counter body rates to drive them to zero
                     control_gain = 10.0  # RPM per deg/s - allows 360° rotation without saturation
                     
@@ -1456,9 +1496,85 @@ class SpacecraftSimulator:
                         # Check if attitude reached
                         if not self.adcs_state['desat_attitude_reached'] and in_desat_attitude:
                             self.adcs_state['desat_attitude_reached'] = True
-                            self.add_evr(f"Desaturation attitude reached - ready for thruster firing")
+                            self.add_evr(f"Desaturation attitude reached - beginning thruster firing")
                         
-                        # Thruster firing logic removed - thrusters not coupled yet
+                        # Fire thrusters to reduce wheel momentum when at desaturation attitude
+                        if self.adcs_state['desat_attitude_reached'] and any_outside_deadband:
+                            # Thruster specifications (typical 1N monoprop thruster for 6U CubeSat)
+                            thrust_force = 1.0  # Newtons
+                            moment_arm = 0.15  # meters (thruster offset from CoM for 6U)
+                            burn_duration_per_cycle = 0.1  # seconds per simulation cycle
+                            
+                            # Calculate delta-V from thrust
+                            spacecraft_mass = 12.0 + self.prop_state['propellant_mass']  # kg (dry + wet)
+                            delta_v_per_cycle = (thrust_force * burn_duration_per_cycle) / spacecraft_mass  # m/s
+                            
+                            # Calculate angular momentum change from thruster torque
+                            torque = moment_arm * thrust_force  # N·m
+                            angular_impulse = torque * burn_duration_per_cycle  # N·m·s
+                            total_momentum_reduction = angular_impulse * 300.0  # Scaling factor: N·m·s to RPM
+                            
+                            # Calculate fuel consumption
+                            isp = 220.0  # seconds (N2H4 monoprop)
+                            g0 = 9.81  # m/s²
+                            fuel_per_cycle = (spacecraft_mass * delta_v_per_cycle) / (isp * g0)  # kg
+                            
+                            # Apply fuel consumption for thruster burn
+                            fuel_before = self.prop_state['propellant_mass']
+                            self.prop_state['propellant_mass'] -= fuel_per_cycle
+                            self.prop_state['propellant_mass'] = max(0.0, self.prop_state['propellant_mass'])
+                            fuel_consumed = fuel_before - self.prop_state['propellant_mass']
+                            
+                            # Accumulate total delta-V for mission tracking
+                            self.prop_state['total_delta_v'] += delta_v_per_cycle
+                            
+                            # Log thruster firing event (throttled)
+                            if not hasattr(self, '_last_thruster_evr_time'):
+                                self._last_thruster_evr_time = 0.0
+                            if elapsed_time - self._last_thruster_evr_time > 5.0:  # EVR every 5 seconds
+                                self.add_evr(f"THRUSTERS FIRING: Desaturation burn (ΔV={delta_v_per_cycle*1000:.1f} mm/s, fuel={fuel_consumed*1000:.2f}g)")
+                                self.add_evr(f"Momentum reduction: {total_momentum_reduction:.0f} RPM, Remaining fuel: {self.prop_state['propellant_mass']*1000:.1f}g")
+                                self._last_thruster_evr_time = elapsed_time
+                            
+                            # Reduce momentum across ALL wheels proportionally
+                            h_x = self.adcs_state['rws_momentum_x']
+                            h_y = self.adcs_state['rws_momentum_y']
+                            h_z = self.adcs_state['rws_momentum_z']
+                            h_mag = math.sqrt(h_x**2 + h_y**2 + h_z**2)
+                            
+                            if h_mag > 0:
+                                # Calculate proportion of momentum in each axis
+                                h_x_frac = abs(h_x) / h_mag
+                                h_y_frac = abs(h_y) / h_mag
+                                h_z_frac = abs(h_z) / h_mag
+                                
+                                # Reduce each wheel proportionally
+                                if self.adcs_state['rws_rpm_x'] > 0:
+                                    self.adcs_state['rws_rpm_x'] -= total_momentum_reduction * h_x_frac
+                                else:
+                                    self.adcs_state['rws_rpm_x'] += total_momentum_reduction * h_x_frac
+                                    
+                                if self.adcs_state['rws_rpm_y'] > 0:
+                                    self.adcs_state['rws_rpm_y'] -= total_momentum_reduction * h_y_frac
+                                else:
+                                    self.adcs_state['rws_rpm_y'] += total_momentum_reduction * h_y_frac
+                                    
+                                if self.adcs_state['rws_rpm_z'] > 0:
+                                    self.adcs_state['rws_rpm_z'] -= total_momentum_reduction * h_z_frac
+                                else:
+                                    self.adcs_state['rws_rpm_z'] += total_momentum_reduction * h_z_frac
+                            
+                            # Automatic valve control
+                            if not self.prop_state['desat_valve_auto']:
+                                self.prop_state['valve_open'] = True
+                                self.prop_state['desat_valve_auto'] = True
+                                self.add_evr("PROP valve opened (auto desaturation)")
+                        else:
+                            # Not firing thrusters - close valve if it was open for desat
+                            if self.prop_state['desat_valve_auto']:
+                                self.prop_state['valve_open'] = False
+                                self.prop_state['desat_valve_auto'] = False
+                                self.add_evr("PROP valve closed (desat pause)")
                     
                     elif self.adcs_state['rws_desaturation_active'] and not any_outside_deadband:
                         # Desaturation complete - all axes within deadband
