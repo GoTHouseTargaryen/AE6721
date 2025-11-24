@@ -123,8 +123,8 @@ class SpacecraftSimulator:
             'prop_temp_min_caution': -10.0,
             'prop_temp_max_warn': 60.0,
             'prop_temp_max_caution': 50.0,
-            'propellant_mass_min_warn': 0.01,  # kg
-            'propellant_mass_min_caution': 0.05,
+            'propellant_mass_min_warn': 0.05,  # kg (50 g - 10% remaining)
+            'propellant_mass_min_caution': 0.1,  # kg (100 g - 20% remaining)
             
             # AVI (Avionics)
             'cpu_load_max_warn': 95.0,
@@ -153,7 +153,7 @@ class SpacecraftSimulator:
             'valve_open': False,
             'tank_pressure': 200.0,  # psi
             'tank_temp': 20.0,  # °C
-            'propellant_mass': 0.5,  # kg (hydrazine or similar monoprop)
+            'propellant_mass': 0.5,  # kg (500 g of hydrazine or similar monoprop)
             'propellant_type': 'N2H4',  # Hydrazine monopropellant
             'total_delta_v': 0.0,  # m/s
             'desat_valve_auto': False,  # True when valve auto-opened for desaturation
@@ -591,35 +591,40 @@ class SpacecraftSimulator:
         # Apply delta-V components to orbital velocity
         v_new = v_orbital + dv_tangential
         
-        # Check escape velocity
-        escape_velocity_squared = 2 * mu / r
-        if v_new**2 >= escape_velocity_squared:
-            v_new = 0.99 * math.sqrt(escape_velocity_squared)
-            self.add_evr("WARNING: Delta-V would exceed escape velocity - clamping")
+        # Calculate new semi-major axis using vis-viva equation: v² = μ(2/r - 1/a)
+        # Rearranging: 1/a = 2/r - v²/μ
+        # Therefore: a = 1 / (2/r - v²/μ)
+        specific_orbital_energy = v_new**2 / 2.0 - mu / r  # J/kg
         
-        # Calculate new orbital parameters
-        # Tangential delta-V affects semi-major axis
-        denominator = 2.0/r - v_new**2/mu
-        if denominator <= 0:
-            self.add_evr("ERROR: Invalid orbital parameters after delta-V - reverting")
+        # Check for hyperbolic orbit (positive energy means unbound orbit)
+        # If energy >= 0, orbit is unbound (parabolic or hyperbolic)
+        if specific_orbital_energy >= 0:
+            self.add_evr("WARNING: Delta-V would result in escape trajectory - clamping to 1% of requested")
+            # Drastically reduce delta-V to keep orbit bound
+            v_new = v_orbital + dv_tangential * 0.01  # Only 1% of requested delta-V
+            specific_orbital_energy = v_new**2 / 2.0 - mu / r
+            
+        # Additional sanity check: if still hyperbolic, reject entirely
+        if specific_orbital_energy >= 0:
+            self.add_evr("ERROR: Cannot apply delta-V without exceeding escape energy - burn rejected")
             return
         
-        a_new = 1.0 / denominator
+        a_new = -mu / (2.0 * specific_orbital_energy)  # semi-major axis in meters
+        
+        # Sanity checks
+        if a_new < r_earth * 1000 or a_new > r_earth * 1000 * 100:
+            self.add_evr(f"WARNING: Delta-V resulted in unrealistic orbit (a={a_new/1000:.0f}km) - skipping")
+            return
         
         # Radial delta-V affects eccentricity (changes orbit shape)
         # Simplified: radial thrust at periapsis/apoapsis changes eccentricity
         # For small delta-V, approximate effect on altitude variation
-        altitude_variation = abs(dv_radial) * r / v_orbital  # meters
+        altitude_variation = abs(dv_radial) * r / v_orbital if v_orbital > 0 else 0.0  # meters
         
         # Normal delta-V affects inclination (orbit plane tilt)
         # Δi ≈ Δv_normal / v_orbital (radians)
         inclination_change_rad = dv_normal / v_orbital if v_orbital > 0 else 0.0
         inclination_change_deg = math.degrees(inclination_change_rad)
-        
-        # Sanity check
-        if a_new < r_earth * 1000 or a_new > r_earth * 1000 * 100:
-            self.add_evr(f"WARNING: Delta-V resulted in unrealistic orbit (a={a_new/1000:.0f}km) - skipping")
-            return
         
         # Update orbital parameters
         altitude_new = (a_new / 1000.0) - r_earth  # km
@@ -1441,7 +1446,7 @@ class SpacecraftSimulator:
                 # Catalyst must be at operating temperature (300°C+) for thruster firing
                 if (self.prop_state['system_enabled'] and 
                     self.prop_state['catalyst_ready'] and 
-                    self.prop_state['propellant_mass'] > 0.01):
+                    self.prop_state['propellant_mass'] > 0.01):  # > 10 g remaining
                     if any_needs_desat_start or (self.adcs_state['rws_desaturation_active'] and any_outside_deadband):
                         
                         # Start or continue desaturation
@@ -1472,24 +1477,29 @@ class SpacecraftSimulator:
                         
                         # Fire thrusters to reduce wheel momentum when at desaturation attitude
                         if self.adcs_state['desat_attitude_reached'] and any_outside_deadband:
-                            # Thruster specifications (typical 1N monoprop thruster for 6U CubeSat)
-                            thrust_force = 1.0  # Newtons
+                            # Thruster specifications (typical RCS thruster for 6U CubeSat)
+                            thrust_force = 0.010  # Newtons (10 mN - realistic for CubeSat RCS)
                             moment_arm = 0.15  # meters (thruster offset from CoM for 6U)
                             burn_duration_per_cycle = 0.1  # seconds per simulation cycle
                             
-                            # Calculate delta-V from thrust
+                            # Rocket equation: Δv = Isp × g₀ × ln(m₀ / m₁)
+                            # For small burns: Δv ≈ Isp × g₀ × (Δm / m)
+                            isp = 220.0  # seconds (N2H4 monoprop)
+                            g0 = 9.81  # m/s²
                             spacecraft_mass = 12.0 + self.prop_state['propellant_mass']  # kg (dry + wet)
-                            delta_v_per_cycle = (thrust_force * burn_duration_per_cycle) / spacecraft_mass  # m/s
+                            
+                            # Calculate fuel mass flow rate: ṁ = F / (Isp × g₀)
+                            mass_flow_rate = thrust_force / (isp * g0)  # kg/s
+                            fuel_per_cycle = mass_flow_rate * burn_duration_per_cycle  # kg
+                            
+                            # Calculate delta-V using rocket equation (small burn approximation)
+                            # Δv = Isp × g₀ × ln(m₀ / m₁) ≈ Isp × g₀ × (Δm / m) for small Δm
+                            delta_v_per_cycle = (isp * g0 * fuel_per_cycle) / spacecraft_mass  # m/s
                             
                             # Calculate angular momentum change from thruster torque
                             torque = moment_arm * thrust_force  # N·m
                             angular_impulse = torque * burn_duration_per_cycle  # N·m·s
                             total_momentum_reduction = angular_impulse * 300.0  # Scaling factor: N·m·s to RPM
-                            
-                            # Calculate fuel consumption
-                            isp = 220.0  # seconds (N2H4 monoprop)
-                            g0 = 9.81  # m/s²
-                            fuel_per_cycle = (spacecraft_mass * delta_v_per_cycle) / (isp * g0)  # kg
                             
                             # Apply fuel consumption for thruster burn
                             fuel_before = self.prop_state['propellant_mass']
@@ -1500,17 +1510,8 @@ class SpacecraftSimulator:
                             # Accumulate total delta-V for mission tracking
                             self.prop_state['total_delta_v'] += delta_v_per_cycle
                             
-                            # Apply delta-V to orbital parameters
-                            # Thruster firing changes spacecraft velocity, affecting orbit
-                            # Direction depends on spacecraft attitude and thruster orientation
-                            self._apply_delta_v_to_orbit(
-                                delta_v_per_cycle,
-                                {
-                                    'roll': self.adcs_state['roll'],
-                                    'pitch': self.adcs_state['pitch'],
-                                    'yaw': self.adcs_state['yaw']
-                                }
-                            )
+                            # TODO: Apply delta-V to orbital parameters
+                            # self._apply_delta_v_to_orbit(delta_v_per_cycle, {...})
                             
                             # Log thruster firing event (throttled)
                             if not hasattr(self, '_last_thruster_evr_time'):
@@ -1564,15 +1565,21 @@ class SpacecraftSimulator:
                         # Desaturation complete - all axes within deadband
                         self.adcs_state['rws_desaturation_active'] = False
                         self.adcs_state['desat_attitude_reached'] = False
-                        # Restore previous ADCS mode
+                        # Restore previous ADCS mode, or default to SUN_POINT
                         if hasattr(self.adcs_state, 'pre_desat_mode'):
-                            self.adcs_state['mode'] = self.adcs_state['pre_desat_mode']
+                            restored_mode = self.adcs_state['pre_desat_mode']
                             del self.adcs_state['pre_desat_mode']
+                        else:
+                            restored_mode = 'SUN_POINT'
+                        
+                        # Always go to SUN_POINT after desaturation
+                        self.adcs_state['mode'] = 'SUN_POINT'
+                        
                         if self.prop_state['desat_valve_auto']:
                             self.prop_state['valve_open'] = False
                             self.prop_state['desat_valve_auto'] = False
                             self.add_evr("PROP valve closed (auto desaturation)")
-                        self.add_evr(f"RWS desaturation complete - ADCS mode restored to {self.adcs_state['mode']}")
+                        self.add_evr(f"RWS desaturation complete - ADCS mode set to {self.adcs_state['mode']}")
                         self.add_evr(f"RWS desaturation complete - all axes within {target_rpm:.0f} ± {desat_deadband:.0f} RPM")
                         
                 elif self.adcs_state['rws_desaturation_active']:
@@ -1633,17 +1640,29 @@ class SpacecraftSimulator:
             
             # COMPOUND ANOMALY: PROP valve stuck open - continuous propellant leak
             if self.anomaly_states['prop_valve_stuck_open'] and self.prop_state['system_enabled']:
-                # Uncontrolled propellant venting
-                leak_rate = 0.01  # kg per cycle (much faster than normal burn)
-                self.prop_state['propellant_mass'] -= leak_rate
-                self.prop_state['propellant_mass'] = max(0.0, self.prop_state['propellant_mass'])
-                
                 # Uncontrolled thrust creates deltaV
-                thrust_force = 1.0  # N
-                spacecraft_mass = 12.0 + self.prop_state['propellant_mass']
+                thrust_force = 0.010  # N (10 mN - realistic for CubeSat RCS)
                 burn_duration = 0.1  # seconds
-                delta_v = (thrust_force * burn_duration) / spacecraft_mass
+                
+                # Rocket equation: Δv = Isp × g₀ × ln(m₀ / m₁)
+                # For small burns: Δv ≈ Isp × g₀ × (Δm / m)
+                isp = 220.0  # seconds (N2H4 monoprop)
+                g0 = 9.81  # m/s²
+                spacecraft_mass = 12.0 + self.prop_state['propellant_mass']  # kg
+                
+                # Calculate fuel mass flow rate: ṁ = F / (Isp × g₀)
+                mass_flow_rate = thrust_force / (isp * g0)  # kg/s
+                fuel_consumed = mass_flow_rate * burn_duration  # kg
+                
+                # Calculate delta-V using rocket equation (small burn approximation)
+                delta_v = (isp * g0 * fuel_consumed) / spacecraft_mass  # m/s
+                
+                self.prop_state['propellant_mass'] -= fuel_consumed
+                self.prop_state['propellant_mass'] = max(0.0, self.prop_state['propellant_mass'])
                 self.prop_state['total_delta_v'] += delta_v
+                
+                # TODO: Apply delta-V to orbit (uncontrolled thrust affects orbital parameters)
+                # self._apply_delta_v_to_orbit(delta_v, {...})
                 
                 # Force valve to OPEN state
                 self.prop_state['valve_open'] = True
@@ -1855,7 +1874,7 @@ class SpacecraftSimulator:
             
             # Update tank pressure based on propellant mass
             if self.prop_state['propellant_mass'] > 0:
-                self.prop_state['tank_pressure'] = 200.0 * (self.prop_state['propellant_mass'] / 0.5)
+                self.prop_state['tank_pressure'] = 200.0 * (self.prop_state['propellant_mass'] / 0.5)  # Normalize to 500 g nominal
             else:
                 self.prop_state['tank_pressure'] = 0.0
             
@@ -1870,14 +1889,33 @@ class SpacecraftSimulator:
                 
                 if not self.prop_state['desat_valve_auto']:
                     # Manual maneuver in progress
-                    consumption = 0.001  # kg per cycle
-                    self.prop_state['propellant_mass'] = max(0.0, self.prop_state['propellant_mass'] - consumption)
+                    thrust_force = 3.6  # N (higher thrust for faster propellant consumption)
+                    burn_duration = 0.1  # seconds per cycle
+                    
+                    # Rocket equation: Δv = Isp × g₀ × ln(m₀ / m₁)
+                    # For small burns: Δv ≈ Isp × g₀ × (Δm / m)
+                    isp = 220.0  # seconds (N2H4 monoprop)
+                    g0 = 9.81  # m/s²
+                    spacecraft_mass = 12.0 + self.prop_state['propellant_mass']  # kg
+                    
+                    # Calculate fuel mass flow rate: ṁ = F / (Isp × g₀)
+                    mass_flow_rate = thrust_force / (isp * g0)  # kg/s
+                    fuel_consumed = mass_flow_rate * burn_duration  # kg
+                    
+                    # Calculate delta-V using rocket equation (small burn approximation)
+                    delta_v_manual = (isp * g0 * fuel_consumed) / spacecraft_mass  # m/s
+                    
+                    self.prop_state['propellant_mass'] -= fuel_consumed
+                    self.prop_state['propellant_mass'] = max(0.0, self.prop_state['propellant_mass'])
                     
                     if self.prop_state['propellant_mass'] <= 0:
                         self.prop_state['valve_open'] = False
                         self.add_evr("PROP: Propellant depleted, valve closed")
                     else:
-                        self.prop_state['total_delta_v'] += 0.1  # m/s
+                        self.prop_state['total_delta_v'] += delta_v_manual
+                        
+                        # TODO: Apply delta-V to orbit (manual thrust affects orbital parameters)
+                        # self._apply_delta_v_to_orbit(delta_v_manual, {...})
             
     def _update_comm(self, elapsed_time):
         """Update Communications"""

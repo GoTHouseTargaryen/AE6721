@@ -225,6 +225,26 @@ class EIDGUI:
         canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
         canvas.configure(yscrollcommand=scrollbar.set)
         
+        # Enable mousewheel scrolling for main telemetry display
+        def _on_mousewheel(event):
+            canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+        
+        # Bind mousewheel to canvas and scrollable frame so it works anywhere in the display area
+        canvas.bind("<MouseWheel>", _on_mousewheel)
+        scrollable_frame.bind("<MouseWheel>", _on_mousewheel)
+        
+        # Also bind to Enter/Leave events to enable scrolling when mouse is over the area
+        def _bind_to_mousewheel(event):
+            canvas.bind_all("<MouseWheel>", _on_mousewheel)
+        
+        def _unbind_from_mousewheel(event):
+            canvas.unbind_all("<MouseWheel>")
+        
+        canvas.bind("<Enter>", _bind_to_mousewheel)
+        canvas.bind("<Leave>", _unbind_from_mousewheel)
+        scrollable_frame.bind("<Enter>", _bind_to_mousewheel)
+        scrollable_frame.bind("<Leave>", _unbind_from_mousewheel)
+        
         canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         
@@ -1093,9 +1113,10 @@ class EIDGUI:
         # PROP (Propulsion)
         elif subsystem == 'prop':
             if key == 'propellant_mass':
-                if value < 0.01:
+                # Thresholds for 500g (0.5 kg) total capacity
+                if value < 0.05:  # < 50g (10% remaining)
                     return self.colors['bg_tlm_warning']
-                elif value < 0.05:
+                elif value < 0.1:  # < 100g (20% remaining)
                     return self.colors['bg_tlm_caution']
                 else:
                     return self.colors['bg_tlm_good']
@@ -1241,6 +1262,49 @@ class EIDGUI:
                 if value > 40 or value < -30:
                     return self.colors['bg_tlm_warning']
                 elif value > 35 or value < -20:
+                    return self.colors['bg_tlm_caution']
+                else:
+                    return self.colors['bg_tlm_good']
+                    
+        # GPS (Navigation)
+        elif subsystem == 'gps':
+            # Check if GPS has valid position solution
+            position_valid = subsystem_data.get('position_valid', False) if subsystem_data else False
+            
+            if key == 'position_valid':
+                # Red if invalid, green if valid
+                if not value:
+                    return self.colors['bg_tlm_warning']
+                else:
+                    return self.colors['bg_tlm_good']
+                    
+            elif key == 'num_satellites':
+                # Red if <4 (no position), yellow if 4-5, green if 6+
+                if value < 4:
+                    return self.colors['bg_tlm_warning']
+                elif value < 6:
+                    return self.colors['bg_tlm_caution']
+                else:
+                    return self.colors['bg_tlm_good']
+                    
+            elif key in ['position_accuracy', 'velocity_accuracy']:
+                # Show caution if GPS doesn't have valid position
+                if not position_valid:
+                    return self.colors['bg_tlm_caution']
+                    
+                # Otherwise, threshold-based coloring for accuracy values
+                if value > 50:
+                    return self.colors['bg_tlm_warning']
+                elif value >= 40:
+                    return self.colors['bg_tlm_caution']
+                else:
+                    return self.colors['bg_tlm_good']
+                    
+            elif key == 'receiver_temp':
+                # GPS receiver temperature
+                if value > 70 or value < -30:
+                    return self.colors['bg_tlm_warning']
+                elif value > 60 or value < -20:
                     return self.colors['bg_tlm_caution']
                 else:
                     return self.colors['bg_tlm_good']
