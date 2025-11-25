@@ -1018,36 +1018,14 @@ class SpacecraftSimulator:
                 mode = self.adcs_state['mode']
                 
                 if mode == 'DESAT':
-                    # DESAT mode: Slew to desaturation attitude using normal ADCS control
-                    # Target attitude for thruster firing
-                    target_roll = self.adcs_state.get('desat_target_roll', 0.0)
-                    target_pitch = self.adcs_state.get('desat_target_pitch', 45.0)
-                    target_yaw = self.adcs_state.get('desat_target_yaw', 0.0)
+                    # DESAT mode: No slewing - just maintain current attitude
+                    # Desaturation happens via thruster firing in _update_adcs, not attitude control
+                    # Keep attitude rates at zero to maintain stability during thruster firing
+                    self.adcs_state['roll_rate'] *= 0.95  # Light damping
+                    self.adcs_state['pitch_rate'] *= 0.95
+                    self.adcs_state['yaw_rate'] *= 0.95
                     
-                    # Calculate attitude errors
-                    roll_error = target_roll - self.adcs_state['roll']
-                    pitch_error = target_pitch - self.adcs_state['pitch']
-                    yaw_error = target_yaw - self.adcs_state['yaw']
-                    
-                    # Wrap errors to ±180°
-                    roll_error = (roll_error + 180) % 360 - 180
-                    pitch_error = (pitch_error + 180) % 360 - 180
-                    yaw_error = (yaw_error + 180) % 360 - 180
-                    
-                    # PD controller for attitude control (more aggressive for desat)
-                    Kp = 0.16  # Higher proportional gain for faster slewing (doubled for 2x speed)
-                    Kd = 0.8   # Derivative gain (damping)
-                    
-                    target_roll_rate = Kp * roll_error - Kd * self.adcs_state['roll_rate']
-                    target_pitch_rate = Kp * pitch_error - Kd * self.adcs_state['pitch_rate']
-                    target_yaw_rate = Kp * yaw_error - Kd * self.adcs_state['yaw_rate']
-                    
-                    # Update rates towards target (doubled for 2x speed)
-                    self.adcs_state['roll_rate'] += (target_roll_rate - self.adcs_state['roll_rate']) * 0.2
-                    self.adcs_state['pitch_rate'] += (target_pitch_rate - self.adcs_state['pitch_rate']) * 0.2
-                    self.adcs_state['yaw_rate'] += (target_yaw_rate - self.adcs_state['yaw_rate']) * 0.2
-                    
-                    # Update angles
+                    # Update angles with damped rates
                     self.adcs_state['roll'] += self.adcs_state['roll_rate']
                     self.adcs_state['pitch'] += self.adcs_state['pitch_rate']
                     self.adcs_state['yaw'] += self.adcs_state['yaw_rate']
@@ -1442,7 +1420,7 @@ class SpacecraftSimulator:
                                     pitch_error < attitude_tolerance and 
                                     yaw_error < attitude_tolerance)
                 
-                # Start desaturation if threshold exceeded AND catalyst ready AND in attitude
+                # Start desaturation if threshold exceeded AND catalyst ready
                 # Catalyst must be at operating temperature (300°C+) for thruster firing
                 if (self.prop_state['system_enabled'] and 
                     self.prop_state['catalyst_ready'] and 
@@ -1452,33 +1430,18 @@ class SpacecraftSimulator:
                         # Start or continue desaturation
                         if not self.adcs_state['rws_desaturation_active']:
                             # Just started desaturation sequence
-                            # Store previous mode to restore after desaturation
-                            if not hasattr(self.adcs_state, 'pre_desat_mode'):
-                                self.adcs_state['pre_desat_mode'] = self.adcs_state['mode']
-                            self.adcs_state['mode'] = 'DESAT'
-                            # Set target attitude for ADCS to slew to
-                            self.adcs_state['desat_target_roll'] = desat_roll
-                            self.adcs_state['desat_target_pitch'] = desat_pitch
-                            self.adcs_state['desat_target_yaw'] = desat_yaw
                             self.adcs_state['rws_desaturation_active'] = True
-                            self.adcs_state['desat_attitude_reached'] = False
                             axes_desat = []
                             if needs_desat_start_x: axes_desat.append('X')
                             if needs_desat_start_y: axes_desat.append('Y')
                             if needs_desat_start_z: axes_desat.append('Z')
                             self.add_evr(f"RWS desaturation initiated - axes: {', '.join(axes_desat)}")
                             self.add_evr(f"Target: {target_rpm:.0f} RPM ± {desat_deadband:.0f} RPM")
-                            self.add_evr(f"Slewing to desaturation attitude (R={desat_roll}° P={desat_pitch}° Y={desat_yaw}°)")
                         
-                        # Check if attitude reached
-                        if not self.adcs_state['desat_attitude_reached'] and in_desat_attitude:
-                            self.adcs_state['desat_attitude_reached'] = True
-                            self.add_evr(f"Desaturation attitude reached - beginning thruster firing")
-                        
-                        # Fire thrusters to reduce wheel momentum when at desaturation attitude
-                        if self.adcs_state['desat_attitude_reached'] and any_outside_deadband:
-                            # Thruster specifications (typical RCS thruster for 6U CubeSat)
-                            thrust_force = 0.010  # Newtons (10 mN - realistic for CubeSat RCS)
+                        # Fire thrusters to reduce wheel momentum (no slewing needed)
+                        if any_outside_deadband:
+                            # Thruster specifications (higher thrust for 30-second desat)
+                            thrust_force = 6.0  # Newtons (6 N - for 30-second desaturation)
                             moment_arm = 0.15  # meters (thruster offset from CoM for 6U)
                             burn_duration_per_cycle = 0.1  # seconds per simulation cycle
                             
@@ -1499,7 +1462,7 @@ class SpacecraftSimulator:
                             # Calculate angular momentum change from thruster torque
                             torque = moment_arm * thrust_force  # N·m
                             angular_impulse = torque * burn_duration_per_cycle  # N·m·s
-                            total_momentum_reduction = angular_impulse * 300.0  # Scaling factor: N·m·s to RPM
+                            total_momentum_reduction = angular_impulse * 3000.0  # Scaling factor: N·m·s to RPM (increased for faster desat)
                             
                             # Apply fuel consumption for thruster burn
                             fuel_before = self.prop_state['propellant_mass']
@@ -1564,14 +1527,6 @@ class SpacecraftSimulator:
                     elif self.adcs_state['rws_desaturation_active'] and not any_outside_deadband:
                         # Desaturation complete - all axes within deadband
                         self.adcs_state['rws_desaturation_active'] = False
-                        self.adcs_state['desat_attitude_reached'] = False
-                        # Restore previous ADCS mode, or default to SUN_POINT
-                        if hasattr(self.adcs_state, 'pre_desat_mode'):
-                            restored_mode = self.adcs_state['pre_desat_mode']
-                            del self.adcs_state['pre_desat_mode']
-                        else:
-                            restored_mode = 'SUN_POINT'
-                        
                         # Always go to SUN_POINT after desaturation
                         self.adcs_state['mode'] = 'SUN_POINT'
                         
@@ -1585,7 +1540,6 @@ class SpacecraftSimulator:
                 elif self.adcs_state['rws_desaturation_active']:
                     # Desaturation aborted (PROP disabled, catalyst not ready, or out of fuel)
                     self.adcs_state['rws_desaturation_active'] = False
-                    self.adcs_state['desat_attitude_reached'] = False
                     if self.prop_state['desat_valve_auto']:
                         self.prop_state['valve_open'] = False
                         self.prop_state['desat_valve_auto'] = False
@@ -1889,7 +1843,7 @@ class SpacecraftSimulator:
                 
                 if not self.prop_state['desat_valve_auto']:
                     # Manual maneuver in progress
-                    thrust_force = 3.6  # N (higher thrust for faster propellant consumption)
+                    thrust_force = 36.0  # N (high thrust for 0.1kg/min consumption rate)
                     burn_duration = 0.1  # seconds per cycle
                     
                     # Rocket equation: Δv = Isp × g₀ × ln(m₀ / m₁)
